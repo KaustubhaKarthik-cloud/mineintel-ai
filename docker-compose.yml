@@ -1,0 +1,43 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: mineintel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mineintel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mineintel}
+      POSTGRES_DB: ${POSTGRES_DB:-mineintel}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - mineintel_pgdata:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mineintel} -d ${POSTGRES_DB:-mineintel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mineintel-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-mineintel}:${POSTGRES_PASSWORD:-mineintel}@db:5432/${POSTGRES_DB:-mineintel}
+      USE_SQLITE: "false"
+      DEMO_MODE: ${DEMO_MODE:-true}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./documents:/app/documents
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  mineintel_pgdata:

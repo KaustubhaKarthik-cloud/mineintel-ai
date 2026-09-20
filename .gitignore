@@ -1,0 +1,73 @@
+# Environment / secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+*.pem
+*.key
+credentials*.json
+**/secrets/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+backend/*.db
+mineintel_demo.db
+
+# Python
+.venv/
+venv/
+backend/.venv/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+node_modules/
+dist/
+build/
+
+# Logs / temp
+logs/
+*.log
+tmp/
+temp/
+*.tmp
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Uploads & generated artifacts (keep folder placeholder)
+documents/*
+!documents/.gitkeep
+
+# Local models (never commit weights / Ollama blobs)
+*.gguf
+*.pth
+*.pt
+*.onnx
+*.safetensors
+models/
+ollama/
+.ollama/
+
+# Forensic / local debug / E2E scratch (not product source)
+backend/_forensic_*
+backend/_e2e_*
+**/_forensic_*
+_forensic_probe.py
