@@ -314,31 +314,47 @@ export async function getEntityCompare(params: {
 export async function chatAssistant(
   message: string,
   sessionId?: string,
+  documentId?: string,
 ): Promise<{
   session_id: string
   reply: string
   sources: ChatSource[]
   query_type?: string | null
+  domain?: string | null
+  geological_intent?: string | null
   structured_evidence?: Array<Record<string, unknown>>
   rag_evidence?: Array<Record<string, unknown>>
   conflicts?: Array<Record<string, unknown>>
   chart?: import('../types').AssistantChart | null
   warnings?: string[]
+  llm?: Record<string, unknown> | null
+  document_id?: string | null
+  document_scope_mode?: string | null
 }> {
   const data = await fetchJson<{
     session_id: string
     reply: string
     sources: ChatSource[]
     query_type?: string | null
+    domain?: string | null
+    geological_intent?: string | null
+    is_geological?: boolean
     structured_evidence?: Array<Record<string, unknown>>
     rag_evidence?: Array<Record<string, unknown>>
     conflicts?: Array<Record<string, unknown>>
     chart?: import('../types').AssistantChart | null
     warnings?: string[]
+    llm?: Record<string, unknown> | null
+    document_id?: string | null
+    document_scope_mode?: string | null
   }>('/assistant/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({
+      message,
+      session_id: sessionId,
+      document_id: documentId || undefined,
+    }),
   })
   if (data) return data
 
@@ -347,7 +363,7 @@ export async function chatAssistant(
     reply:
       'Assistant backend unreachable. Start the API on port 8000, then ask again.',
     sources: [],
-    warnings: ['Backend offline'],
+    warnings: ['Backend unreachable'],
   }
 }
 
@@ -531,12 +547,19 @@ export type ReportItem = {
   title: string
   report_type: string
   status: string
+  domain?: string
   generated_by?: string | null
   created_at?: string | null
   source_documents?: string[]
   parameters?: Record<string, unknown>
   has_content?: boolean
   content?: string
+  warnings?: string[]
+  pending_verification?: boolean
+  review_required_count?: number
+  open_conflicts?: number
+  insufficient?: boolean
+  provenance_count?: number
 }
 
 export async function getReports() {
@@ -546,10 +569,12 @@ export async function getReports() {
 export async function generateReport(body: {
   title?: string
   report_type?: string
+  domain?: 'mining' | 'geological' | 'combined'
   entity?: string
   metric?: string
   period?: string
   document_ids?: string[]
+  sections?: string[]
 }) {
   return fetchJsonOrThrow<ReportItem>('/reports/generate', {
     method: 'POST',
@@ -570,10 +595,8 @@ export function reportDownloadUrl(id: string) {
   return `${API_BASE}/reports/${id}/download`
 }
 
-export async function downloadReportFile(id: string, title?: string) {
-  const res = await fetch(`${API_BASE}/reports/${id}/download`, {
-    headers: authHeaders(),
-  })
+async function downloadBinary(path: string, filename: string) {
+  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() })
   if (!res.ok) {
     let detail = `Download failed (${res.status})`
     try {
@@ -588,13 +611,34 @@ export async function downloadReportFile(id: string, title?: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${(title || 'report').replace(/\s+/g, '_').slice(0, 80)}.html`
+  a.download = filename
   a.click()
   URL.revokeObjectURL(url)
 }
 
+export async function downloadReportFile(id: string, title?: string) {
+  const name = `${(title || 'report').replace(/\s+/g, '_').slice(0, 80)}.html`
+  await downloadBinary(`/reports/${id}/download`, name)
+}
+
+export async function downloadReportPdf(id: string, title?: string) {
+  const name = `${(title || 'report').replace(/\s+/g, '_').slice(0, 80)}.pdf`
+  await downloadBinary(`/reports/${id}/pdf`, name)
+}
+
+export async function downloadReportExcel(id: string, title?: string) {
+  const name = `${(title || 'report').replace(/\s+/g, '_').slice(0, 80)}.xlsx`
+  await downloadBinary(`/reports/${id}/excel`, name)
+}
+
 export async function deleteReport(id: string) {
   return fetchJsonOrThrow<{ status: string; id: string }>(`/reports/${id}`, { method: 'DELETE' })
+}
+
+export async function getGeologyDocuments() {
+  return fetchJsonOrThrow<{ total: number; items: Array<Record<string, unknown>> }>(
+    '/geology/documents',
+  )
 }
 
 export async function getSystemStatus() {
@@ -680,4 +724,100 @@ export function stageLabel(stage?: string | null) {
     failed: 'Processing failed',
   }
   return stage ? map[stage] ?? stage.replace(/_/g, ' ') : ''
+}
+
+// ── Geological Explorer (G4) ────────────────────────────────
+
+function geologyQuery(params: Record<string, string | undefined>) {
+  const q = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v) q.set(k, v)
+  })
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+
+export async function getGeologyExplorer(params: Record<string, string | undefined> = {}) {
+  return fetchJsonOrThrow<{
+    summary: Record<string, unknown>
+    filters: {
+      documents: Array<Record<string, unknown>>
+      formations: string[]
+      seams: string[]
+      boreholes: string[]
+      metrics: string[]
+      statuses: string[]
+    }
+    facts: { total: number; items: Array<Record<string, unknown>> }
+    formations: Array<Record<string, unknown>>
+    seams: Array<Record<string, unknown>>
+    boreholes: Array<Record<string, unknown>>
+  }>(`/geology/explorer${geologyQuery(params)}`)
+}
+
+export async function getGeologyFact(factId: string) {
+  return fetchJsonOrThrow<Record<string, unknown>>(`/geology/facts/${factId}`)
+}
+
+export async function getGeologyAnalytics(params: Record<string, string | undefined> = {}) {
+  return fetchJsonOrThrow<{
+    summary: Record<string, unknown>
+    resources_by_seam: {
+      items: Array<Record<string, unknown>>
+      empty: boolean
+      message?: string | null
+      pending_verification?: boolean
+    }
+    formation_seam: {
+      items: Array<Record<string, unknown>>
+      empty: boolean
+      message?: string | null
+      pending_verification?: boolean
+    }
+    borehole_depths: {
+      items: Array<Record<string, unknown>>
+      empty: boolean
+      message?: string | null
+      pending_verification?: boolean
+    }
+    seam_thickness: {
+      items: Array<Record<string, unknown>>
+      empty: boolean
+      message?: string | null
+      pending_verification?: boolean
+    }
+  }>(`/geology/analytics${geologyQuery(params)}`)
+}
+
+export async function getGeologyCompare(documentIdA: string, documentIdB: string) {
+  const q = new URLSearchParams({
+    document_id_a: documentIdA,
+    document_id_b: documentIdB,
+  })
+  return fetchJsonOrThrow<{
+    document_a: Record<string, unknown>
+    document_b: Record<string, unknown>
+    comparisons: Array<Record<string, unknown>>
+    note?: string
+  }>(`/geology/compare?${q}`)
+}
+
+export async function explainGeologyAnalytics(body: {
+  question: string
+  analytic?: string
+  document_id?: string
+  document_id_b?: string
+  formation?: string
+  seam?: string
+  evidence?: Record<string, unknown>
+}) {
+  return fetchJsonOrThrow<{
+    explanation: string
+    evidence_used: Record<string, unknown>
+    provider: string
+  }>('/geology/analytics/explain', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
 }

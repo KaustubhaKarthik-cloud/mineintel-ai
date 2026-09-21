@@ -8,6 +8,7 @@ import { DashboardPage } from './pages/DashboardPage'
 import { DocumentDetailPage } from './pages/DocumentDetailPage'
 import { DocumentsPage } from './pages/DocumentsPage'
 import { ExplorerPage } from './pages/ExplorerPage'
+import { GeologicalExplorerPage } from './pages/GeologicalExplorerPage'
 import { LoginPage } from './pages/LoginPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { ReportDetailPage } from './pages/ReportDetailPage'
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="validation" element={<ValidationPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="explorer" element={<ExplorerPage />} />
+            <Route path="geology" element={<GeologicalExplorerPage />} />
             <Route path="assistant" element={<AssistantPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="topics" element={<TopicsPage />} />

@@ -63,6 +63,7 @@ class DocumentDetailOut(DocumentOut):
     pages: list[DocumentPageOut] = []
     meta: Optional[dict[str, Any]] = None
     facts: list["ExtractedFactOut"] = []
+    geological_facts: list["GeologicalFactOut"] = []
     latest_extraction_job: Optional["ExtractionJobOut"] = None
     conflicts: list["ValidationConflictOut"] = []
 
@@ -85,6 +86,83 @@ class ProcessingStatusOut(BaseModel):
 
 
 # ── Phase 3 facts / extraction ─────────────────────────────
+
+class GeologicalFactOut(BaseModel):
+    id: str
+    domain: Optional[str] = "geological"
+    metric_kind: Optional[str] = None
+    borehole_id: Optional[str] = None
+    seam_name: Optional[str] = None
+    seam_status: Optional[str] = None
+    depth: Optional[str] = None
+    depth_unit: Optional[str] = None
+    depth_normalized_m: Optional[float] = None
+    thickness: Optional[str] = None
+    thickness_unit: Optional[str] = None
+    thickness_normalized_m: Optional[float] = None
+    thickness_min: Optional[str] = None
+    thickness_max: Optional[str] = None
+    thickness_min_normalized_m: Optional[float] = None
+    thickness_max_normalized_m: Optional[float] = None
+    depth_min: Optional[str] = None
+    depth_max: Optional[str] = None
+    depth_min_normalized_m: Optional[float] = None
+    depth_max_normalized_m: Optional[float] = None
+    original_value: Optional[str] = None
+    original_unit: Optional[str] = None
+    value_qualifier: Optional[str] = None
+    lithology: Optional[str] = None
+    geological_formation: Optional[str] = None
+    geological_structure: Optional[str] = None
+    coal_quality_parameter: Optional[str] = None
+    coal_quality_value: Optional[str] = None
+    coal_quality_unit: Optional[str] = None
+    source_document_id: str
+    source_page: Optional[int] = None
+    source_location: Optional[str] = None
+    evidence_text: Optional[str] = None
+    extraction_confidence: float = 0.0
+    status: str = "extracted"
+    original_extracted_value: Optional[str] = None
+    corrected_value: Optional[str] = None
+    corrected_unit: Optional[str] = None
+    corrected_by: Optional[str] = None
+    corrected_at: Optional[datetime] = None
+    correction_reason: Optional[str] = None
+    fact_version: int = 1
+    warnings: Optional[list[Any]] = None
+    table_context: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class GeologicalFactsResponse(BaseModel):
+    total: int
+    items: list[GeologicalFactOut]
+
+
+class ClassificationOut(BaseModel):
+    domain: str
+    label: str
+    confidence: float
+    scores: dict[str, float] = Field(default_factory=dict)
+    matched_terms: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class GeologicalPipelineOut(BaseModel):
+    classification: ClassificationOut
+    facts_count: int
+    fact_ids: list[str] = Field(default_factory=list)
+
+
+class GeologicalFactReviewAction(BaseModel):
+    action: str = Field(..., description="approve | reject | correct")
+    corrected_value: Optional[str] = None
+    corrected_unit: Optional[str] = None
+    reason: Optional[str] = None
+    reviewer: Optional[str] = None
+
 
 class ExtractedFactOut(BaseModel):
     id: str
@@ -193,6 +271,7 @@ class ReviewListResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
     session_id: Optional[str] = None
+    document_id: Optional[str] = None
 
 
 class ChatSource(BaseModel):
@@ -209,16 +288,23 @@ class ChatResponse(BaseModel):
     reply: str
     sources: list[ChatSource] = []
     query_type: Optional[str] = None
+    domain: Optional[str] = None
+    geological_intent: Optional[str] = None
+    is_geological: bool = False
     structured_evidence: list[dict[str, Any]] = Field(default_factory=list)
     rag_evidence: list[dict[str, Any]] = Field(default_factory=list)
     conflicts: list[dict[str, Any]] = Field(default_factory=list)
     chart: Optional[dict[str, Any]] = None
     warnings: list[str] = Field(default_factory=list)
+    document_id: Optional[str] = None
+    document_scope_mode: Optional[str] = None
+    llm: Optional[dict[str, Any]] = None
 
 
 class AssistantQueryRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     session_id: Optional[str] = None
+    document_id: Optional[str] = None
     history: list[dict[str, str]] = Field(default_factory=list)
 
 

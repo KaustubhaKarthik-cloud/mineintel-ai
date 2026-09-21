@@ -22,9 +22,19 @@ class EvidencePack:
     warnings: list[str] = field(default_factory=list)
     meta_conflicts: list[dict[str, Any]] = field(default_factory=list)
     multi_fact: Optional[dict[str, Any]] = None
+    llm_meta: Optional[dict[str, Any]] = None
 
     def to_prompt_context(self) -> str:
-        blocks = [f"QUESTION: {self.plan.raw_question}", f"QUERY_TYPE: {self.plan.query_type}", ""]
+        is_geo = bool(getattr(self.plan, "is_geological", False))
+        blocks = [
+            f"QUESTION: {self.plan.raw_question}",
+            f"QUERY_TYPE: {self.plan.query_type}",
+            f"DOMAIN: {getattr(self.plan, 'domain', 'general')}",
+            f"GEOLOGICAL_INTENT: {getattr(self.plan, 'geological_intent', None) or 'n/a'}",
+            f"ENTITY: {self.plan.entity or 'n/a'}",
+            f"METRICS: {', '.join(self.plan.metrics or []) or 'n/a'}",
+            "",
+        ]
         if self.multi_fact:
             blocks.append("MULTI-FACT REASONING RESULT (pre-calculated; do not recompute or invent):")
             blocks.append(str(self.multi_fact))
@@ -39,21 +49,89 @@ class EvidencePack:
                         f"{e.value} {e.unit or ''} | {e.evidence_text or ''}"
                     )
             blocks.append("")
+        if self.meta_conflicts:
+            blocks.append("GEOLOGICAL / META CONFLICTS (do not pick a side):")
+            for c in self.meta_conflicts:
+                blocks.append(f"- {c.get('description')}")
+                for e in c.get("evidence") or []:
+                    blocks.append(
+                        f"  [{e.get('label')}] {e.get('document')} page {e.get('page')}: "
+                        f"{e.get('value')} {e.get('unit') or ''} status={e.get('status')} "
+                        f"| {e.get('evidence') or ''}"
+                    )
+            blocks.append("")
         if self.structured:
-            blocks.append("VERIFIED STRUCTURED EVIDENCE:")
-            for h in self.structured:
+            if is_geo:
                 blocks.append(
-                    f"- {h.entity} | {h.metric} | {h.period} = {h.value} {h.unit or ''} "
-                    f"(status={h.status}) source={h.document_name} page={h.page} "
-                    f"evidence={h.evidence_text or ''}"
+                    "STRUCTURED GEOLOGICAL FACTS "
+                    "(status high_confidence/approved/corrected = verified; "
+                    "review_required/extracted = unverified extracted evidence — label clearly). "
+                    "Associate a value with a seam/borehole ONLY when that field is present:"
                 )
+                intent = getattr(self.plan, "geological_intent", None) or (
+                    self.plan.metrics[0] if self.plan.metrics else None
+                )
+                vals: list[str] = []
+                seen_v: set[str] = set()
+                for h in self.structured:
+                    v = (h.value or "").strip()
+                    if not v:
+                        continue
+                    seam = (getattr(h, "seam_name", None) or "").strip()
+                    key = f"{seam.lower()}|{v.lower()}"
+                    if key in seen_v:
+                        continue
+                    seen_v.add(key)
+                    page = f"p.{h.page}" if h.page is not None else "p.?"
+                    label = f"{seam}: {v}" if seam else v
+                    vals.append(f"{label} ({h.document_name}, {page}, status={h.status})")
+                    if len(vals) >= 25:
+                        break
+                if vals and intent:
+                    blocks.append(
+                        f"VALUE SUMMARY for intent={intent} (use these names/IDs when listing): "
+                        + "; ".join(vals)
+                    )
+                for h in self.structured:
+                    seam = getattr(h, "seam_name", None) or "n/a"
+                    bh = getattr(h, "borehole_id", None) or "n/a"
+                    if getattr(h, "value_min", None) and getattr(h, "value_max", None):
+                        range_s = f"{h.value_min}–{h.value_max}"
+                    else:
+                        range_s = h.value or "n/a"
+                    blocks.append(
+                        f"- DOCUMENT={h.document_name} | DOCUMENT_ID={h.document_id} | "
+                        f"FORMATION={getattr(h, 'geological_formation', None) or 'n/a'} | "
+                        f"SEAM={seam} | SEAM_STATUS={getattr(h, 'seam_status', None) or 'n/a'} | "
+                        f"BOREHOLE={bh} | "
+                        f"METRIC={h.metric} | RANGE_OR_VALUE={range_s} | UNIT={h.unit or ''} | "
+                        f"PAGE={h.page} | STATUS={h.status} | CONFIDENCE={h.confidence:.2f} | "
+                        f"FACT_ID={h.fact_id} | "
+                        f"EVIDENCE={h.evidence_text or ''}"
+                    )
+            else:
+                blocks.append("VERIFIED STRUCTURED EVIDENCE:")
+                for h in self.structured:
+                    blocks.append(
+                        f"- DOCUMENT={h.document_name} | PAGE={h.page} | METRIC={h.metric} | "
+                        f"VALUE={h.value} | UNIT={h.unit or ''} | STATUS={h.status} | "
+                        f"CONFIDENCE={h.confidence:.2f} | EVIDENCE={h.evidence_text or ''}"
+                    )
             blocks.append("")
         if self.rag:
-            blocks.append("DOCUMENT / RAG EVIDENCE:")
+            if is_geo:
+                blocks.append(
+                    "GEOLOGICAL DOCUMENT / RAG EVIDENCE "
+                    "(use only claims supported by these excerpts; cite DOCUMENT + PAGE):"
+                )
+            else:
+                blocks.append("DOCUMENT / RAG EVIDENCE:")
             for i, h in enumerate(self.rag, 1):
                 loc = h.sheet_name or (f"page {h.page}" if h.page is not None else "n/a")
+                snippet = (h.text or "")[:900]
                 blocks.append(
-                    f"- [R{i}] {h.document_name} ({loc}) score={h.score:.3f}: {h.text[:500]}"
+                    f"- [R{i}] DOCUMENT={h.document_name} | PAGE={loc} | "
+                    f"SCORE={h.score:.3f} | EVIDENCE={snippet}"
                 )
             blocks.append("")
         if self.chart:
@@ -72,4 +150,5 @@ class EvidencePack:
             "chart": self.chart,
             "warnings": list(self.warnings),
             "multi_fact": self.multi_fact,
+            "llm_meta": self.llm_meta,
         }

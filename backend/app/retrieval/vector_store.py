@@ -121,12 +121,15 @@ def search_similar(
     top_k: int,
     min_score: float,
     document_id: Optional[str] = None,
+    document_ids: Optional[list[str]] = None,
     active_only: bool = True,
 ) -> list[SearchHit]:
     q = db.query(DocumentChunk)
     if active_only:
         q = q.filter(DocumentChunk.is_active.is_(True))
-    if document_id:
+    if document_ids:
+        q = q.filter(DocumentChunk.document_id.in_(list(document_ids)))
+    elif document_id:
         q = q.filter(DocumentChunk.document_id == document_id)
     rows = q.filter(DocumentChunk.embedding_json.isnot(None)).all()
     hits: list[SearchHit] = []

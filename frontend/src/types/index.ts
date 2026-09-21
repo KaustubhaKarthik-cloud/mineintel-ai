@@ -187,11 +187,15 @@ export interface ChatMessage {
   content: string
   sources?: ChatSource[]
   query_type?: string
+  domain?: string
+  geological_intent?: string
+  is_geological?: boolean
   structured_evidence?: Array<Record<string, unknown>>
   rag_evidence?: Array<Record<string, unknown>>
   conflicts?: Array<Record<string, unknown>>
   chart?: AssistantChart | null
   warnings?: string[]
+  llm?: Record<string, unknown>
 }
 
 export interface DashboardStats {

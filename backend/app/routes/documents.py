@@ -14,7 +14,7 @@ from app.ai_extraction.service import ExtractionServiceError, run_batch_extracti
 from app.auth.deps import AuthUser, get_current_user, require_permission
 from app.database import get_db
 from app.document_processing.service import get_processing_status, process_document
-from app.models import Document, DocumentChunk, DocumentStatus, ExtractedFact, ExtractionJob
+from app.models import Document, DocumentChunk, DocumentStatus, ExtractedFact, ExtractionJob, GeologicalFact
 from app.retrieval.service import IndexingError, index_document
 from app.schemas import (
     BatchExtractRequest,
@@ -27,10 +27,16 @@ from app.schemas import (
     ExtractedFactOut,
     ExtractionJobOut,
     ExtractionSummaryOut,
+    GeologicalFactOut,
+    GeologicalFactReviewAction,
+    GeologicalFactsResponse,
+    GeologicalPipelineOut,
     IndexResultOut,
     ProcessingStatusOut,
     ValidationConflictOut,
 )
+from app.geology.review import GeologicalReviewError, review_geological_fact
+from app.geology.service import run_geological_pipeline
 from app.services.audit import write_audit
 from app.utils.files import (
     FileValidationError,
@@ -97,12 +103,68 @@ def _to_document_out(doc: Document) -> DocumentOut:
     return data.model_copy(update={"upload_date": doc.created_at})
 
 
+def _geo_fact_out(row: GeologicalFact) -> GeologicalFactOut:
+    return GeologicalFactOut(
+        id=row.id,
+        domain=getattr(row, "domain", None) or "geological",
+        metric_kind=getattr(row, "metric_kind", None),
+        borehole_id=row.borehole_id,
+        seam_name=row.seam_name,
+        seam_status=getattr(row, "seam_status", None),
+        depth=row.depth,
+        depth_unit=row.depth_unit,
+        depth_normalized_m=row.depth_normalized_m,
+        thickness=row.thickness,
+        thickness_unit=row.thickness_unit,
+        thickness_normalized_m=row.thickness_normalized_m,
+        thickness_min=getattr(row, "thickness_min", None),
+        thickness_max=getattr(row, "thickness_max", None),
+        thickness_min_normalized_m=getattr(row, "thickness_min_normalized_m", None),
+        thickness_max_normalized_m=getattr(row, "thickness_max_normalized_m", None),
+        depth_min=getattr(row, "depth_min", None),
+        depth_max=getattr(row, "depth_max", None),
+        depth_min_normalized_m=getattr(row, "depth_min_normalized_m", None),
+        depth_max_normalized_m=getattr(row, "depth_max_normalized_m", None),
+        original_value=getattr(row, "original_value", None),
+        original_unit=getattr(row, "original_unit", None),
+        value_qualifier=getattr(row, "value_qualifier", None),
+        lithology=row.lithology,
+        geological_formation=row.geological_formation,
+        geological_structure=row.geological_structure,
+        coal_quality_parameter=row.coal_quality_parameter,
+        coal_quality_value=row.coal_quality_value,
+        coal_quality_unit=row.coal_quality_unit,
+        source_document_id=row.document_id,
+        source_page=row.source_page,
+        source_location=row.source_location,
+        evidence_text=row.evidence_text,
+        extraction_confidence=row.extraction_confidence or 0.0,
+        status=row.status,
+        original_extracted_value=getattr(row, "original_extracted_value", None),
+        corrected_value=getattr(row, "corrected_value", None),
+        corrected_unit=getattr(row, "corrected_unit", None),
+        corrected_by=getattr(row, "corrected_by", None),
+        corrected_at=getattr(row, "corrected_at", None),
+        correction_reason=getattr(row, "correction_reason", None),
+        fact_version=getattr(row, "fact_version", None) or 1,
+        warnings=row.warnings,
+        table_context=row.table_context,
+        created_at=row.created_at,
+    )
+
+
 def _build_detail(db: Session, doc: Document) -> DocumentDetailOut:
     pages = [DocumentPageOut.model_validate(p) for p in sorted(doc.pages, key=lambda x: x.page_number)]
     facts = (
         db.query(ExtractedFact)
         .filter(ExtractedFact.document_id == doc.id)
         .order_by(ExtractedFact.page_number, ExtractedFact.field_name)
+        .all()
+    )
+    geo_facts = (
+        db.query(GeologicalFact)
+        .filter(GeologicalFact.document_id == doc.id)
+        .order_by(GeologicalFact.source_page, GeologicalFact.created_at)
         .all()
     )
     job = (
@@ -131,6 +193,7 @@ def _build_detail(db: Session, doc: Document) -> DocumentDetailOut:
         pages=pages,
         meta=doc.meta,
         facts=fact_outs,
+        geological_facts=[_geo_fact_out(g) for g in geo_facts],
         latest_extraction_job=ExtractionJobOut.model_validate(job) if job else None,
         conflicts=[_conflict_out(c) for c in doc_conflicts],
     )
@@ -204,6 +267,76 @@ def list_facts(document_id: str, db: Session = Depends(get_db)) -> list[Extracte
         .all()
     )
     return [ExtractedFactOut.model_validate(f) for f in facts]
+
+
+@router.get("/{document_id}/geological-facts", response_model=GeologicalFactsResponse)
+def list_geological_facts(
+    document_id: str,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("documents.read")),
+) -> GeologicalFactsResponse:
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    rows = (
+        db.query(GeologicalFact)
+        .filter(GeologicalFact.document_id == document_id)
+        .order_by(GeologicalFact.source_page, GeologicalFact.created_at)
+        .all()
+    )
+    return GeologicalFactsResponse(total=len(rows), items=[_geo_fact_out(r) for r in rows])
+
+
+@router.post(
+    "/{document_id}/geological-facts/{fact_id}/review",
+    response_model=GeologicalFactOut,
+)
+def review_document_geological_fact(
+    document_id: str,
+    fact_id: str,
+    body: GeologicalFactReviewAction,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("review.act")),
+) -> GeologicalFactOut:
+    """Human review for a geological fact — never silently promotes review_required."""
+    row = (
+        db.query(GeologicalFact)
+        .filter(GeologicalFact.id == fact_id, GeologicalFact.document_id == document_id)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Geological fact not found")
+    try:
+        updated = review_geological_fact(
+            db,
+            fact_id,
+            action=body.action,
+            corrected_value=body.corrected_value,
+            corrected_unit=body.corrected_unit,
+            reviewer=body.reviewer or user.username,
+            reason=body.reason,
+        )
+        db.commit()
+        db.refresh(updated)
+    except GeologicalReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _geo_fact_out(updated)
+
+
+@router.post("/{document_id}/geological-pipeline", response_model=GeologicalPipelineOut)
+def run_document_geological_pipeline(
+    document_id: str,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("documents.read")),
+) -> GeologicalPipelineOut:
+    """Re-run G1 classification + geological extraction on existing page text."""
+    doc = db.query(Document).filter(Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc.pages:
+        raise HTTPException(status_code=400, detail="Document has no extracted pages. Process the document first.")
+    result = run_geological_pipeline(db, doc)
+    return GeologicalPipelineOut(**result)
 
 
 @router.post("/{document_id}/extract", response_model=ExtractionSummaryOut)
@@ -338,6 +471,37 @@ async def upload_document(
         version = max_ver + 1
         parent_id = root.id
         replaces_id = parent.id
+    else:
+        # Soft version link: same original filename → treat as new version of latest copy
+        # (prevents duplicate uploads from appearing as unrelated documents in retrieval)
+        from app.assistant.document_resolver import filename_key
+
+        key = filename_key(original_name)
+        if key:
+            siblings = [
+                d
+                for d in db.query(Document).all()
+                if filename_key(d.original_filename or d.filename) == key
+            ]
+            if siblings:
+                siblings.sort(
+                    key=lambda d: (
+                        d.version or 1,
+                        d.created_at.timestamp() if d.created_at else 0,
+                    ),
+                    reverse=True,
+                )
+                latest = siblings[0]
+                root = latest
+                while root.parent_document_id:
+                    nxt = db.query(Document).filter(Document.id == root.parent_document_id).first()
+                    if not nxt:
+                        break
+                    root = nxt
+                max_ver = max((d.version or 1) for d in siblings)
+                version = max_ver + 1
+                parent_id = root.id
+                replaces_id = latest.id
 
     actor = (uploaded_by or "").strip() or user.username
     document = Document(

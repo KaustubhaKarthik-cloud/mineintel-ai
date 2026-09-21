@@ -136,13 +136,148 @@ def text_matches_entity(hay: str, entity: Optional[str]) -> bool:
     )
 
 
-def text_matches_metric(hay: str, metrics: list[str]) -> bool:
+def text_matches_metric(hay: str, metrics: list[str], plan=None) -> bool:
     if not metrics:
         return True
     low = hay.lower()
+    # Never map bare "thickness" → seam_thickness (formation/parting share the word).
+    geo_aliases: dict[str, tuple[str, ...]] = {
+        "seam": ("coal seam", "seam horizon", "seams", "seam"),
+        "seam_thickness": (
+            "seam thickness",
+            "thickness of the coal seam",
+            "thickness of the seam",
+            "thickness of seam",
+            "general thickness",
+        ),
+        "formation_thickness": (
+            "formation thickness",
+            "thickness of the formation",
+            "thickness of formation",
+            "average thickness of the",
+        ),
+        "seam_parting_thickness": (
+            "parting thickness",
+            "thickness of the parting",
+            "thickness of parting",
+            "parting",
+        ),
+        "overburden_thickness": ("overburden thickness", "thickness of overburden"),
+        "seam_depth": ("seam depth", "depth of occurrence", "depth of the seam"),
+        "borehole_depth": ("borehole depth", "depth of the borehole", "depth of borehole"),
+        "borehole": ("borehole", "boreholes", "drilling"),
+        "lithology": ("lithology", "sandstone", "shale", "coal"),
+        "formation": ("formation", "formations"),
+        "geological_structure": ("fault", "structure", "fold"),
+        "coal_quality": ("coal quality", "ash", "gcv", "moisture"),
+        "resource": (
+            "inferred resource",
+            "indicated resource",
+            "measured resource",
+            "geological resource",
+            "resource estimate",
+            "gross inferred resource",
+            "coal resource",
+            "resources",
+            "resource",
+        ),
+        "reserve": (
+            "inferred reserve",
+            "indicated reserve",
+            "measured reserve",
+            "proved reserve",
+            "geological reserve",
+            "coal reserve",
+            "reserves",
+            "reserve",
+        ),
+    }
     for m in metrics:
         m = (m or "").lower()
         if not m:
+            continue
+        if m == "seam_thickness":
+            # Require seam subject + thickness cue + a numeric measure.
+            from app.geology.metric_kinds import (
+                classify_evidence_metric_kind,
+                metrics_compatible,
+                _has_thickness_measure,
+                _METHODOLOGY_THICKNESS_RE,
+                _SEAM_THICKNESS_RE,
+            )
+            from app.geology.entities import seams_match
+            from app.geology.seam_ids import normalize_seam_identifier
+
+            if not _has_thickness_measure(hay) and not re.search(
+                r"\d+(?:[.,]\d+)?\s*(?:m|cm|mm)\b", low
+            ):
+                continue
+            # Never accept workable / dirt-band methodology as named seam thickness
+            if re.search(r"(?i)\b(?:minimum\s+)?workable\s+thickness\b", low):
+                continue
+            if re.search(r"(?i)\bbelow\s+\d+\s*cm\s+thickness\b", low):
+                continue
+            if _METHODOLOGY_THICKNESS_RE.search(hay) and not _SEAM_THICKNESS_RE.search(hay):
+                continue
+            if re.search(r"(?i)\bdirt\s*bands?\b", low) and not re.search(
+                r"(?i)\bseam\s+(?:thickness|[a-z0-9])", low
+            ):
+                continue
+            kind = classify_evidence_metric_kind(
+                text=hay,
+                has_thickness=False,
+                requested="seam_thickness",
+            )
+            if kind and not metrics_compatible("seam_thickness", kind):
+                continue
+            if kind is None and _METHODOLOGY_THICKNESS_RE.search(hay):
+                continue
+            # When the query names a seam, evidence must mention that seam
+            # near a thickness cue (avoid long-page co-occurrence false positives).
+            want = getattr(plan, "geological_seam", None)
+            if want:
+                want_norm = normalize_seam_identifier(want) or want
+                from app.geology.entities import extract_seams_from_question
+
+                mentioned = extract_seams_from_question(hay) or []
+                if not any(seams_match(s, want_norm) for s in mentioned):
+                    rest = re.sub(r"(?i)^seam\s+", "", want_norm).strip()
+                    if not rest or not re.search(
+                        rf"(?i)\b{re.escape(rest)}\b", hay
+                    ):
+                        continue
+                # Require seam identifier within ~120 chars of a thickness cue
+                rest = re.sub(r"(?i)^seam\s+", "", want_norm).strip()
+                if rest:
+                    near = re.search(
+                        rf"(?i)(?:\b{re.escape(rest)}\b.{{0,120}}\b(?:thickness|thick)\b|"
+                        rf"\b(?:thickness|thick)\b.{{0,120}}\b{re.escape(rest)}\b)",
+                        hay,
+                    )
+                    if not near and not _SEAM_THICKNESS_RE.search(hay):
+                        continue
+            if any(a in low for a in geo_aliases["seam_thickness"]) and re.search(
+                r"\bseams?\b", low
+            ):
+                return True
+            if _SEAM_THICKNESS_RE.search(hay) and _has_thickness_measure(hay):
+                return True
+            if re.search(r"\bseams?\b", low) and re.search(r"\bthickness|thick\b", low):
+                if want and _SEAM_THICKNESS_RE.search(hay):
+                    return True
+                if not want and (
+                    not re.search(r"\bformation\b", low)
+                    or re.search(r"\bthickness\s+of\s+(?:the\s+)?seam\b", low)
+                ):
+                    return True
+            continue
+        if m == "minimum_workable_seam_thickness":
+            if re.search(r"(?i)\b(?:minimum\s+)?workable\s+thickness\b", low):
+                return True
+            continue
+        if m in geo_aliases:
+            if any(a in low for a in geo_aliases[m]):
+                return True
             continue
         if m == "production":
             if any(k in low for k in ("production", "produced", "output", "tonnage")):
@@ -284,6 +419,18 @@ def evidence_compatible(
             active_periods=active_periods,
         )
 
+    # G1.1 — geological / document-narrative: skip mining production factual-role checks
+    if getattr(plan, "is_geological", False) or getattr(plan, "domain", None) == "geological":
+        return _geological_compatible(
+            plan,
+            text or "",
+            require_entity=require_entity,
+            require_metric=require_metric,
+            require_period=require_period,
+            active_periods=active_periods,
+            meta=meta,
+        )
+
     hay = text or ""
     reasons: list[str] = []
     score = 1.0
@@ -309,7 +456,7 @@ def evidence_compatible(
         score -= 0.5
         reasons.append("entity_absent")
 
-    metric_ok = text_matches_metric(hay, metrics)
+    metric_ok = text_matches_metric(hay, metrics, plan=plan)
     if require_metric and metrics and not metric_ok:
         return CompatResult(False, 0.0, ["metric_mismatch"])
     if metrics and metric_ok:
@@ -351,6 +498,132 @@ def evidence_compatible(
     if "coal" in metrics and "coking" not in metrics:
         if re.search(r"\bcoking\s+coal\b", hay, re.I) and "reporting_period=" not in hay.lower():
             return CompatResult(False, 0.0, ["coking_not_thermal_coal"])
+
+    return CompatResult(True, score, reasons)
+
+
+def _geological_compatible(
+    plan: QueryPlan,
+    text: str,
+    *,
+    require_entity: bool = True,
+    require_metric: bool = True,
+    require_period: bool = False,
+    active_periods: Optional[list[str]] = None,
+    meta: Optional[dict] = None,
+) -> CompatResult:
+    """Compatibility for geological queries — no production/FY factual-role gate."""
+    hay = text or ""
+    reasons: list[str] = ["geological_path"]
+    score = 1.0
+    metrics = list(
+        getattr(plan, "geological_metrics", None)
+        or plan.metrics
+        or ([plan.metric] if plan.metric else [])
+    )
+
+    # Explicit document-scope gate (current-document / resolved report)
+    allowed = list(getattr(plan, "scoped_document_ids", None) or [])
+    if allowed and meta:
+        did = meta.get("document_id")
+        if did and did not in allowed:
+            return CompatResult(False, 0.0, ["document_scope_mismatch"])
+        reasons.append("document_scope_ok")
+        score += 0.2
+
+    entity_ok = text_matches_entity(hay, plan.entity)
+    if not entity_ok and plan.entity and meta:
+        doc_blob = " ".join(
+            str(meta.get(k) or "")
+            for k in ("document_name", "original_filename", "filename", "mine_name")
+        )
+        entity_ok = text_matches_entity(doc_blob, plan.entity)
+    if not entity_ok and plan.entity:
+        tokens = entity_tokens(plan.entity)
+        significant = [t for t in tokens if len(t) >= 5]
+        low = hay.lower()
+        if significant and all(t in low for t in significant):
+            entity_ok = True
+
+    # When scoped to a document, do not require entity text match in page body
+    if allowed and meta and meta.get("document_id") in allowed:
+        require_entity = False
+
+    if require_entity and plan.entity and not entity_ok:
+        return CompatResult(False, 0.0, ["entity_mismatch"])
+
+    if plan.entity and entity_ok:
+        score += 0.35
+        reasons.append("entity_match")
+    elif plan.entity and not entity_ok:
+        score -= 0.25
+        reasons.append("entity_absent")
+
+    metric_ok = text_matches_metric(hay, metrics, plan=plan)
+    if require_metric and metrics and not metric_ok:
+        return CompatResult(False, 0.0, ["metric_mismatch"])
+    if metrics and metric_ok:
+        score += 0.3
+        reasons.append("metric_match")
+
+    # Metric-kind gate: formation_thickness must not satisfy seam_thickness, etc.
+    from app.geology.metric_kinds import (
+        THICKNESS_METRICS,
+        classify_evidence_metric_kind,
+        metrics_compatible,
+    )
+
+    requested_kinds = [
+        m
+        for m in metrics
+        if m
+        in THICKNESS_METRICS
+        | {"seam_depth", "borehole_depth", "stratigraphic_depth"}
+    ]
+    if requested_kinds:
+        primary_req = requested_kinds[0]
+        seam_hint = None
+        bh_hint = None
+        fm_hint = None
+        if meta:
+            seam_hint = meta.get("seam_name")
+            bh_hint = meta.get("borehole_id")
+            fm_hint = meta.get("geological_formation")
+        evidence_kind = classify_evidence_metric_kind(
+            text=hay,
+            seam_name=seam_hint,
+            borehole_id=bh_hint,
+            geological_formation=fm_hint,
+            has_thickness=bool(re.search(r"(?i)\bthickness|thick\b", hay)),
+            has_depth=bool(re.search(r"(?i)\bdepth|deep\b", hay)),
+            requested=primary_req,
+        )
+        if not metrics_compatible(primary_req, evidence_kind):
+            return CompatResult(
+                False,
+                0.0,
+                [f"metric_kind_incompatible:{evidence_kind or 'unknown'}!={primary_req}"],
+            )
+        reasons.append(f"metric_kind_ok:{evidence_kind or 'n/a'}")
+        score += 0.15
+
+    # Explicit borehole ID in the question must appear in evidence when requested
+    bh = re.search(r"\b(?:BH|CMBJ|SKJ|MPRJ)[-_]?\w+\b", plan.raw_question or "", re.I)
+    if bh:
+        token = bh.group(0)
+        compact_hay = re.sub(r"[-_\s]", "", hay.lower())
+        compact_tok = re.sub(r"[-_\s]", "", token.lower())
+        if compact_tok not in compact_hay:
+            return CompatResult(False, 0.0, ["borehole_mismatch"])
+        reasons.append("borehole_match")
+        score += 0.25
+
+    periods = active_periods if active_periods is not None else plan.periods
+    if require_period and periods and not text_matches_any_period(hay, periods):
+        return CompatResult(False, 0.0, ["period_mismatch"])
+    if periods and text_matches_any_period(hay, periods):
+        score += 0.1
+        reasons.append("period_match")
 
     return CompatResult(True, score, reasons)
 

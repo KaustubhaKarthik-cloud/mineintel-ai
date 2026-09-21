@@ -10,7 +10,7 @@ from app.models import ValidationConflict
 
 
 def structured_to_dict(h: StructuredFactHit) -> dict[str, Any]:
-    return {
+    d = {
         "entity": h.entity,
         "metric": h.metric,
         "period": h.period,
@@ -27,6 +27,19 @@ def structured_to_dict(h: StructuredFactHit) -> dict[str, Any]:
         "confidence": h.confidence,
         "document_version": h.document_version,
     }
+    if getattr(h, "seam_name", None):
+        d["seam_name"] = h.seam_name
+    if getattr(h, "borehole_id", None):
+        d["borehole_id"] = h.borehole_id
+    if getattr(h, "geological_formation", None):
+        d["geological_formation"] = h.geological_formation
+    if getattr(h, "seam_status", None):
+        d["seam_status"] = h.seam_status
+    if getattr(h, "value_min", None) is not None:
+        d["value_min"] = h.value_min
+    if getattr(h, "value_max", None) is not None:
+        d["value_max"] = h.value_max
+    return d
 
 
 def rag_to_dict(h: RagHit) -> dict[str, Any]:
@@ -80,11 +93,20 @@ def build_chat_sources(
 ) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = []
     seen: set[str] = set()
+    seen_page: set[str] = set()
+
+    def _fname_key(name: Optional[str]) -> str:
+        import re
+
+        return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
     for h in structured:
         key = f"{h.document_id}:{h.page}:{h.fact_id}"
-        if key in seen:
+        page_key = f"{_fname_key(h.document_name)}:{h.page}:{_fname_key(h.value)}"
+        if key in seen or page_key in seen_page:
             continue
         seen.add(key)
+        seen_page.add(page_key)
         sources.append(
             {
                 "document_id": h.document_id,
@@ -97,9 +119,11 @@ def build_chat_sources(
         )
     for h in rag:
         key = f"rag:{h.chunk_id}"
-        if key in seen:
+        page_key = f"{_fname_key(h.document_name)}:{h.page}:{(h.text or '')[:80].lower()}"
+        if key in seen or page_key in seen_page:
             continue
         seen.add(key)
+        seen_page.add(page_key)
         sources.append(
             {
                 "document_id": h.document_id,
@@ -115,9 +139,11 @@ def build_chat_sources(
             if not e.document_id:
                 continue
             key = f"c:{e.id}"
-            if key in seen:
+            page_key = f"{_fname_key(e.document_name)}:{e.page_number}"
+            if key in seen or page_key in seen_page:
                 continue
             seen.add(key)
+            seen_page.add(page_key)
             sources.append(
                 {
                     "document_id": e.document_id,

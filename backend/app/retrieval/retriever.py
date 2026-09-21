@@ -159,6 +159,7 @@ def retrieve(
     top_k: Optional[int] = None,
     min_score: Optional[float] = None,
     document_id: Optional[str] = None,
+    document_ids: Optional[list[str]] = None,
     provider: Optional[EmbeddingProvider] = None,
 ) -> list[SearchHit]:
     settings = get_settings()
@@ -172,6 +173,7 @@ def retrieve(
         top_k=max(50, k * 10),
         min_score=0.0,
         document_id=document_id,
+        document_ids=document_ids,
     )
     hybrid: list[SearchHit] = []
     for hit in pool:

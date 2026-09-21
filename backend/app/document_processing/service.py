@@ -96,11 +96,29 @@ def process_document(db: Session, document: Document) -> Document:
         document.extraction_completed = False  # Phase 3 AI extraction
         document.meta = {**(document.meta or {}), **result.meta}
         document.status = DocumentStatus.COMPLETED.value
-        document.processing_stage = "completed"
+        document.processing_stage = "classifying"
         document.processing_completed_at = _utcnow()
         document.error_message = None
         db.commit()
         db.refresh(document)
+
+        # G1 — domain classification + optional geological fact extraction (rule-based).
+        # Failures here must not fail Phase 2 text extraction.
+        try:
+            from app.geology.service import run_geological_pipeline
+
+            run_geological_pipeline(db, document)
+            db.refresh(document)
+        except Exception as exc:  # noqa: BLE001
+            document.meta = {
+                **(document.meta or {}),
+                "g1_error": str(exc)[:400],
+            }
+            db.commit()
+            db.refresh(document)
+
+        document.processing_stage = "completed"
+        db.commit()
 
         # Auto-index so assistant/RAG can retrieve freshly extracted text.
         # Failures are recorded on the document but do not fail Phase 2 extraction.

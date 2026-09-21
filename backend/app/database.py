@@ -145,6 +145,53 @@ def _sqlite_add_missing_columns() -> None:
                 if col not in report_cols:
                     conn.execute(text(sql))
 
+    # G1.2 — geological thickness/depth ranges
+    if "geological_facts" in tables:
+        geo_cols = {c["name"] for c in insp.get_columns("geological_facts")}
+        geo_alters = [
+            ("thickness_min", "ALTER TABLE geological_facts ADD COLUMN thickness_min VARCHAR(64)"),
+            ("thickness_max", "ALTER TABLE geological_facts ADD COLUMN thickness_max VARCHAR(64)"),
+            (
+                "thickness_min_normalized_m",
+                "ALTER TABLE geological_facts ADD COLUMN thickness_min_normalized_m FLOAT",
+            ),
+            (
+                "thickness_max_normalized_m",
+                "ALTER TABLE geological_facts ADD COLUMN thickness_max_normalized_m FLOAT",
+            ),
+            ("depth_min", "ALTER TABLE geological_facts ADD COLUMN depth_min VARCHAR(64)"),
+            ("depth_max", "ALTER TABLE geological_facts ADD COLUMN depth_max VARCHAR(64)"),
+            (
+                "depth_min_normalized_m",
+                "ALTER TABLE geological_facts ADD COLUMN depth_min_normalized_m FLOAT",
+            ),
+            (
+                "depth_max_normalized_m",
+                "ALTER TABLE geological_facts ADD COLUMN depth_max_normalized_m FLOAT",
+            ),
+            # G2 — structured metric / original value / review history
+            ("domain", "ALTER TABLE geological_facts ADD COLUMN domain VARCHAR(64) DEFAULT 'geological'"),
+            ("metric_kind", "ALTER TABLE geological_facts ADD COLUMN metric_kind VARCHAR(64)"),
+            ("original_value", "ALTER TABLE geological_facts ADD COLUMN original_value VARCHAR(128)"),
+            ("original_unit", "ALTER TABLE geological_facts ADD COLUMN original_unit VARCHAR(32)"),
+            ("value_qualifier", "ALTER TABLE geological_facts ADD COLUMN value_qualifier VARCHAR(16)"),
+            (
+                "original_extracted_value",
+                "ALTER TABLE geological_facts ADD COLUMN original_extracted_value TEXT",
+            ),
+            ("corrected_value", "ALTER TABLE geological_facts ADD COLUMN corrected_value TEXT"),
+            ("corrected_unit", "ALTER TABLE geological_facts ADD COLUMN corrected_unit VARCHAR(64)"),
+            ("corrected_by", "ALTER TABLE geological_facts ADD COLUMN corrected_by VARCHAR(128)"),
+            ("corrected_at", "ALTER TABLE geological_facts ADD COLUMN corrected_at DATETIME"),
+            ("correction_reason", "ALTER TABLE geological_facts ADD COLUMN correction_reason TEXT"),
+            ("fact_version", "ALTER TABLE geological_facts ADD COLUMN fact_version INTEGER DEFAULT 1"),
+            ("seam_status", "ALTER TABLE geological_facts ADD COLUMN seam_status VARCHAR(32)"),
+        ]
+        with engine.begin() as conn:
+            for col, sql in geo_alters:
+                if col not in geo_cols:
+                    conn.execute(text(sql))
+
 
 def init_db() -> None:
     """Create tables and apply lightweight SQLite migrations. Safe on startup."""

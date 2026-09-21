@@ -35,6 +35,15 @@ class StructuredFactHit:
     evidence_text: Optional[str]
     fact_id: str
     confidence: float
+    # Optional geological context (ignored by mining paths)
+    seam_name: Optional[str] = None
+    borehole_id: Optional[str] = None
+    geological_formation: Optional[str] = None
+    seam_status: Optional[str] = None
+    value_min: Optional[str] = None
+    value_max: Optional[str] = None
+    value_min_normalized: Optional[float] = None
+    value_max_normalized: Optional[float] = None
 
 
 def _entity_soft_match(want: Optional[str], have: Optional[str]) -> bool:

@@ -23,6 +23,12 @@ export function DocumentDetailPage() {
   }
 
   useEffect(() => {
+    if (!id) return
+    try {
+      localStorage.setItem('mineintel.current_document_id', id)
+    } catch {
+      /* ignore */
+    }
     reload()
   }, [id])
 
@@ -102,6 +108,12 @@ export function DocumentDetailPage() {
             >
               Open original file
             </a>
+            <Link
+              to={`/assistant?document_id=${encodeURIComponent(doc.id)}`}
+              className="inline-flex items-center gap-2 rounded-md bg-ore-800 px-4 py-2 text-sm font-semibold text-ore-100 ring-1 ring-ore-600 hover:bg-ore-700"
+            >
+              Ask about this report
+            </Link>
             <button
               type="button"
               disabled={extracting || doc.status === 'failed' || doc.status === 'processing'}
@@ -149,7 +161,10 @@ export function DocumentDetailPage() {
         <h2 className="mb-4 font-display text-2xl uppercase tracking-wide text-ore-100">AI extraction</h2>
         {facts.length === 0 ? (
           <div className="panel rounded-lg p-5 text-sm text-ore-400">
-            No structured facts yet. Complete Phase 2, then click <strong className="text-ore-200">Run AI extraction</strong>.
+            No structured mining facts yet. Geological exploration reports may still have
+            G1 geological facts and RAG evidence — use the <strong className="text-ore-200">AI Assistant</strong>.
+            For production reports: ensure Phase 2 finished, then click{' '}
+            <strong className="text-ore-200">Run AI extraction</strong>.
           </div>
         ) : (
           <div className="panel overflow-x-auto rounded-lg">

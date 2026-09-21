@@ -9,6 +9,7 @@ from app.routes import (
     dashboard,
     documents,
     explore,
+    geology,
     health,
     reports,
     reviews,
@@ -28,6 +29,7 @@ api_router.include_router(documents.router, prefix="/documents", tags=["Document
 api_router.include_router(reviews.router, prefix="/reviews", tags=["Reviews"])
 api_router.include_router(assistant.router, prefix="/assistant", tags=["AI Assistant"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
+api_router.include_router(geology.router, prefix="/geology", tags=["Geological Explorer"])
 api_router.include_router(topics.router, prefix="/topics", tags=["Topics"])
 api_router.include_router(search.router, prefix="/search", tags=["Search"])
 api_router.include_router(validation.router, prefix="/validation", tags=["Validation"])

@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Download, ExternalLink } from 'lucide-react'
-import { ApiError, downloadReportFile, formatDate, getReport, reportViewUrl, type ReportItem } from '../lib/api'
+import { ArrowLeft, Download, ExternalLink, FileSpreadsheet, FileText } from 'lucide-react'
+import {
+  ApiError,
+  downloadReportExcel,
+  downloadReportFile,
+  downloadReportPdf,
+  formatDate,
+  getReport,
+  reportViewUrl,
+  type ReportItem,
+} from '../lib/api'
 import { PageHeader, StatusBadge } from '../components/ui'
 
 export function ReportDetailPage() {
@@ -34,6 +43,17 @@ export function ReportDetailPage() {
 
   const params = report.parameters || {}
 
+  async function download(kind: 'html' | 'pdf' | 'excel') {
+    setDownloadError('')
+    try {
+      if (kind === 'html') await downloadReportFile(report!.id, report!.title)
+      else if (kind === 'pdf') await downloadReportPdf(report!.id, report!.title)
+      else await downloadReportExcel(report!.id, report!.title)
+    } catch (e) {
+      setDownloadError(e instanceof ApiError ? e.message : 'Download failed')
+    }
+  }
+
   return (
     <div>
       <Link
@@ -45,7 +65,7 @@ export function ReportDetailPage() {
 
       <PageHeader
         title={report.title}
-        subtitle={`${report.report_type} · ${formatDate(report.created_at)}${
+        subtitle={`${report.domain || report.report_type} · ${formatDate(report.created_at)}${
           report.generated_by ? ` · ${report.generated_by}` : ''
         }`}
         action={
@@ -61,15 +81,24 @@ export function ReportDetailPage() {
             </a>
             <button
               type="button"
-              onClick={() => {
-                setDownloadError('')
-                downloadReportFile(report.id, report.title).catch((e) =>
-                  setDownloadError(e instanceof ApiError ? e.message : 'Download failed'),
-                )
-              }}
+              onClick={() => download('html')}
+              className="inline-flex items-center gap-1.5 rounded-md bg-ore-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-ore-100 ring-1 ring-ore-600"
+            >
+              <FileText className="h-3.5 w-3.5" /> HTML
+            </button>
+            <button
+              type="button"
+              onClick={() => download('pdf')}
               className="inline-flex items-center gap-1.5 rounded-md bg-copper-500 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-ore-950 hover:bg-copper-400"
             >
-              <Download className="h-3.5 w-3.5" /> Download
+              <Download className="h-3.5 w-3.5" /> PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => download('excel')}
+              className="inline-flex items-center gap-1.5 rounded-md bg-ore-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-ore-100 ring-1 ring-ore-600"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5" /> Excel
             </button>
           </div>
         }
@@ -77,9 +106,30 @@ export function ReportDetailPage() {
 
       {downloadError ? <p className="mb-3 text-sm text-signal-red">{downloadError}</p> : null}
 
+      {report.pending_verification ||
+      report.open_conflicts ||
+      report.insufficient ||
+      (report.warnings && report.warnings.length) ? (
+        <div className="mb-4 space-y-1 rounded border border-signal-amber/40 bg-signal-amber/10 px-3 py-2 text-xs text-signal-amber">
+          {report.pending_verification ? (
+            <p>Some geological values require human verification and are marked as pending.</p>
+          ) : null}
+          {report.open_conflicts ? <p>{report.open_conflicts} open validation conflict(s).</p> : null}
+          {report.insufficient ? <p>Some sections have insufficient compatible evidence.</p> : null}
+          {(report.warnings || []).slice(0, 5).map((w) => (
+            <p key={w}>{w}</p>
+          ))}
+        </div>
+      ) : null}
+
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
-        {params.entity ? (
+        {params.domain ? (
           <span className="rounded-full bg-copper-500/15 px-3 py-1 text-copper-300 ring-1 ring-copper-500/30">
+            Domain · {String(params.domain)}
+          </span>
+        ) : null}
+        {params.entity ? (
+          <span className="rounded-full bg-ore-800 px-3 py-1 text-ore-300 ring-1 ring-ore-600">
             Entity · {String(params.entity)}
           </span>
         ) : null}
@@ -88,14 +138,10 @@ export function ReportDetailPage() {
             Metric · {String(params.metric)}
           </span>
         ) : null}
-        {params.period ? (
-          <span className="rounded-full bg-ore-800 px-3 py-1 text-ore-300 ring-1 ring-ore-600">
-            Period · {String(params.period)}
-          </span>
-        ) : null}
         {report.source_documents?.length ? (
           <span className="rounded-full bg-ore-800 px-3 py-1 text-ore-300 ring-1 ring-ore-600">
-            {report.source_documents.length} source doc{report.source_documents.length === 1 ? '' : 's'}
+            {report.source_documents.length} source doc
+            {report.source_documents.length === 1 ? '' : 's'}
           </span>
         ) : null}
       </div>

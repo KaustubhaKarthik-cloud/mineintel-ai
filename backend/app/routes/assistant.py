@@ -35,11 +35,17 @@ def _to_chat_response(result: dict) -> ChatResponse:
         reply=result.get("reply") or result.get("answer") or "",
         sources=sources,
         query_type=result.get("query_type"),
+        domain=result.get("domain"),
+        geological_intent=result.get("geological_intent"),
+        is_geological=bool(result.get("is_geological")),
         structured_evidence=result.get("structured_evidence") or [],
         rag_evidence=result.get("rag_evidence") or [],
         conflicts=result.get("conflicts") or [],
         chart=result.get("chart"),
         warnings=result.get("warnings") or [],
+        document_id=result.get("document_id"),
+        document_scope_mode=result.get("document_scope_mode"),
+        llm=result.get("llm"),
     )
 
 
@@ -47,7 +53,12 @@ def _to_chat_response(result: dict) -> ChatResponse:
 def chat(body: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     """Evidence-grounded assistant (Phase 6). Falls back to demo only if service fails hard."""
     try:
-        result = ask_assistant(db, body.message, session_id=body.session_id)
+        result = ask_assistant(
+            db,
+            body.message,
+            session_id=body.session_id,
+            document_id=body.document_id,
+        )
         return _to_chat_response(result)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail="Assistant query failed.") from exc
@@ -61,6 +72,7 @@ def query(body: AssistantQueryRequest, db: Session = Depends(get_db)) -> ChatRes
             body.question,
             session_id=body.session_id,
             history=body.history,
+            document_id=body.document_id,
         )
         return _to_chat_response(result)
     except Exception as exc:  # noqa: BLE001

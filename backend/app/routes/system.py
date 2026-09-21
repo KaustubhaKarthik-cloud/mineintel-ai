@@ -112,8 +112,12 @@ def system_status(
             "current_user": user.username,
             "role": user.role,
             "permissions": sorted(ROLE_PERMISSIONS.get(user.role, set())),
+            "roles": {
+                role: sorted(perms) for role, perms in ROLE_PERMISSIONS.items()
+            },
             "read_only": True,
-            "note": "Passwords are bcrypt-hashed. Secrets are never returned by this API.",
+            "note": "Passwords are bcrypt-hashed. Secrets are never returned by this API. "
+            "Backend authorization is authoritative; frontend only hides unauthorized actions.",
         },
         "technical_details": {
             "llm_extraction_provider": settings.llm_provider,

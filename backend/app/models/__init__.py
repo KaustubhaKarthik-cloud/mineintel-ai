@@ -555,7 +555,7 @@ class FactCorrectionHistory(Base):
 
 
 class GeologicalFact(Base):
-    """Geological / exploration fact with mandatory source provenance (G1)."""
+    """Geological / exploration fact with mandatory source provenance (G1/G2)."""
 
     __tablename__ = "geological_facts"
 
@@ -564,15 +564,19 @@ class GeologicalFact(Base):
     document_page_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("document_pages.id"), nullable=True, index=True
     )
+    domain: Mapped[str] = mapped_column(String(64), default="geological", index=True)
+    metric_kind: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     borehole_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
     seam_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    # named | uncorrelated | unnamed — uncorrelated/unnamed have no invented identifier
+    seam_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     depth: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     depth_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     depth_normalized_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     thickness: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     thickness_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     thickness_normalized_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    # Range support (e.g. "varies from 0.54m to 1.22m") — single-point facts leave these null
+    # Range support (min/max when source text states a range) — single-point facts leave these null
     thickness_min: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     thickness_max: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     thickness_min_normalized_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -581,6 +585,10 @@ class GeologicalFact(Base):
     depth_max: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     depth_min_normalized_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     depth_max_normalized_m: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Original / qualifier representation (G2) — never lose source form
+    original_value: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    original_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    value_qualifier: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # >, <, ~, range
     lithology: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     geological_formation: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     geological_structure: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -592,6 +600,14 @@ class GeologicalFact(Base):
     evidence_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     extraction_confidence: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(32), default=FactStatus.EXTRACTED.value, index=True)
+    # Human correction history (G2) — never silently overwrite provenance
+    original_extracted_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    corrected_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    corrected_unit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    corrected_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    corrected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    correction_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    fact_version: Mapped[int] = mapped_column(Integer, default=1)
     warnings: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     table_context: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

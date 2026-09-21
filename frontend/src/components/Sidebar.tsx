@@ -33,6 +33,7 @@ const nav: NavItem[] = [
   { to: '/validation', label: 'Validation', icon: ShieldAlert, permission: 'documents.read' },
   { to: '/search', label: 'Semantic Search', icon: Search, permission: 'search' },
   { to: '/explorer', label: 'Data Explorer', icon: Database, permission: 'explore' },
+  { to: '/geology', label: 'Geological Explorer', icon: Mountain, permission: 'explore' },
   { to: '/assistant', label: 'AI Assistant', icon: Bot, permission: 'assistant' },
   { to: '/analytics', label: 'Analytics', icon: BarChart3, permission: 'analytics' },
   { to: '/topics', label: 'Topics', icon: Tags, permission: 'topics' },

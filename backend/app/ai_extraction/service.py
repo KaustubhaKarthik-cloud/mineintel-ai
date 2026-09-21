@@ -63,7 +63,13 @@ def run_extraction(
     )
     if not doc:
         raise ExtractionServiceError("Document not found.")
-    if doc.status != DocumentStatus.COMPLETED.value:
+    if doc.status not in {
+        DocumentStatus.COMPLETED.value,
+        DocumentStatus.EXTRACTED.value,
+        DocumentStatus.REVIEW_REQUIRED.value,
+        DocumentStatus.PENDING_REVIEW.value,
+        DocumentStatus.APPROVED.value,
+    }:
         raise ExtractionServiceError(
             "Document must complete Phase 2 processing before AI extraction."
         )

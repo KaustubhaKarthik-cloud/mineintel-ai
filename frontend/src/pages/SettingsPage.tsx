@@ -108,11 +108,25 @@ export function SettingsPage() {
           <Row label="Current user" value={String(sec.current_user || '—')} readOnly />
           <Row label="Role" value={String(sec.role || '—')} readOnly />
           <Row
-            label="Permissions"
+            label="Your permissions"
             value={(sec.permissions as string[])?.join(', ') || '—'}
             readOnly
           />
-          <p className="text-xs text-ore-500">{String(sec.note || '')}</p>
+          {sec.roles && typeof sec.roles === 'object' ? (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs uppercase tracking-[0.12em] text-ore-500">Role matrix (read-only)</p>
+              {Object.entries(sec.roles as Record<string, string[]>).map(([role, perms]) => (
+                <div key={role} className="rounded border border-ore-800 bg-ore-900/40 px-3 py-2">
+                  <p className="text-sm font-medium uppercase tracking-wide text-copper-300">{role}</p>
+                  <p className="mt-1 text-xs text-ore-400">{perms.join(', ')}</p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <p className="mt-2 text-xs text-ore-500">{String(sec.note || '')}</p>
+          <p className="text-xs text-ore-500">
+            Manage users under Users. Inspect audit events under Audit Logs.
+          </p>
         </Section>
 
         <Section title="Technical details">
