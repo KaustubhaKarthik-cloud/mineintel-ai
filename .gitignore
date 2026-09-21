@@ -62,7 +62,8 @@ documents/*
 *.pt
 *.onnx
 *.safetensors
-models/
+# Only ignore root-level weight dirs — NOT backend/app/models (SQLAlchemy package)
+/models/
 ollama/
 .ollama/
 
