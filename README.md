@@ -89,7 +89,7 @@ Reports (HTML, stored + downloadable)
 | Layer | Technology |
 |-------|------------|
 | Frontend | React, TypeScript, Tailwind CSS, Recharts, Vite |
-| Backend | Python 3.11, FastAPI, SQLAlchemy, Pydantic |
+| Backend | Python 3.10–3.12 (3.11 recommended), FastAPI, SQLAlchemy, Pydantic |
 | Database (local demo) | SQLite |
 | Optional DB | PostgreSQL (Docker Compose available; pgvector-ready dependency present) |
 | Vector index (local) | Document chunks + JSON embeddings in SQLite |
@@ -121,13 +121,28 @@ mineintel-ai/
 
 ## Requirements
 
-Verified on this project:
+**Required**
 
-* **Python** 3.11.x
-* **Node.js** 24.x (Vite frontend; other modern Node LTS versions typically work)
+* **Python 3.10, 3.11, or 3.12** — **3.11 recommended**
+  * Python **3.9 and older will fail** (`numpy==2.2.x` needs `>=3.10`)
+  * Python **3.13** often works; **3.14+** is not yet supported by these pins
+* **Node.js** `^20.19` or `>=22.12` (Vite 8 requirement)
 * **npm** (ships with Node)
 * **Tesseract OCR** (for scanned PDFs/images)
-* **Ollama** (optional for local AI Assistant) + model **`qwen2.5:7b`**
+
+**Optional**
+
+* **Ollama** + model **`qwen2.5:7b`** (local AI Assistant)
+
+Check versions before installing:
+
+```powershell
+py -3.11 --version
+# or
+python --version
+
+node --version
+```
 
 ---
 
@@ -136,7 +151,7 @@ Verified on this project:
 ### 1. Clone
 
 ```powershell
-git clone <YOUR_REPO_URL> mineintel-ai
+git clone https://github.com/KaustubhaKarthik-cloud/mineintel-ai.git
 cd mineintel-ai
 ```
 
@@ -149,13 +164,37 @@ copy .env.example .env
 
 ### 3. Backend dependencies
 
+Use **Python 3.11** if you have multiple versions installed (Windows `py` launcher):
+
 ```powershell
 cd backend
-python -m venv .venv
+py -3.11 -c "import sys; print(sys.version)"   # must print 3.10.x / 3.11.x / 3.12.x
+py -3.11 check_python.py
+```
+
+From `backend/`:
+
+```powershell
+cd backend
+py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 $env:PYTHONPATH=(Get-Location).Path
 ```
+
+macOS / Linux:
+
+```bash
+cd backend
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+export PYTHONPATH="$(pwd)"
+```
+
+If `pip install` says the Python version is too old / incompatible: install Python 3.11 from [python.org](https://www.python.org/downloads/), recreate the venv with `py -3.11 -m venv .venv` (do not reuse an old `.venv` made with 3.9).
 
 ### 4. Frontend dependencies
 
@@ -184,7 +223,7 @@ $env:PYTHONPATH=(Get-Location).Path
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Or from repo root: `.\start-backend.ps1`
+Or from repo root: `.\start-backend.ps1` (auto-picks Python 3.11/3.12/3.10 and refuses unsupported versions)
 
 ### 7. Start frontend
 

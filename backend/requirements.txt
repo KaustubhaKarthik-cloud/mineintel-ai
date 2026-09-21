@@ -15,8 +15,8 @@ PyMuPDF==1.25.1
 pytesseract==0.3.13
 Pillow==11.0.0
 aiofiles==24.1.0
+# numpy 2.2.x requires Python >= 3.10 (Python 3.9 and older will fail install)
 numpy==2.2.1
 pytest==8.3.4
-
 PyJWT==2.10.1
 bcrypt==4.2.1
