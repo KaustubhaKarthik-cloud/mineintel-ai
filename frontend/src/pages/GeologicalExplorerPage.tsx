@@ -147,12 +147,7 @@ function EvidencePanel({
           <dt className="text-[11px] uppercase tracking-wide text-ore-500">Entity / metric</dt>
           <dd className="text-ore-100">
             {[
-              item.display_entity ||
-                item.seam_label ||
-                item.seam ||
-                item.formation_name ||
-                item.formation ||
-                item.borehole_id,
+              item.display_entity,
               item.display_metric ||
                 (item.metric_kind ? String(item.metric_kind).replace(/_/g, ' ') : null),
             ]
@@ -168,10 +163,13 @@ function EvidencePanel({
         <div>
           <dt className="text-[11px] uppercase tracking-wide text-ore-500">Value</dt>
           <dd className="text-copper-300">
-            {String(
-              item.display_value ?? item.value ?? item.original_value ?? 'Not available',
-            )}
-            {item.display_unit || item.unit ? ` ${item.display_unit || item.unit}` : ''}
+            {String(item.display_value ?? 'Not available')}
+            {item.display_unit &&
+            item.display_value &&
+            item.display_value !== 'Not available' &&
+            !String(item.display_value).includes(String(item.display_unit))
+              ? ` ${item.display_unit}`
+              : ''}
           </dd>
           {item.coordinate_evidence_only ? (
             <dd className="mt-1 text-[10px] text-signal-amber">
@@ -658,13 +656,7 @@ export function GeologicalExplorerPage() {
                         className="border-t border-ore-800/80 hover:bg-ore-850/60"
                       >
                         <td className="py-2 text-ore-100">
-                          {String(
-                            f.display_entity ||
-                              f.seam_label ||
-                              f.formation_name ||
-                              f.borehole_id ||
-                              'Not available',
-                          )}
+                          {String(f.display_entity || 'Not available')}
                           {f.display_from_evidence ? (
                             <span className="mt-0.5 block text-[10px] uppercase tracking-wide text-ore-500">
                               from evidence
@@ -681,8 +673,13 @@ export function GeologicalExplorerPage() {
                         </td>
                         <td className="max-w-[280px] text-copper-300">
                           <span className="line-clamp-2">
-                            {String(f.display_value ?? f.evidence_preview ?? 'Not available')}
-                            {f.display_unit ? ` ${f.display_unit}` : ''}
+                            {String(f.display_value ?? 'Not available')}
+                            {f.display_unit &&
+                            f.display_value &&
+                            f.display_value !== 'Not available' &&
+                            !String(f.display_value).includes(String(f.display_unit))
+                              ? ` ${f.display_unit}`
+                              : ''}
                           </span>
                           {f.coordinate_evidence_only ? (
                             <span className="mt-0.5 block text-[10px] text-signal-amber">

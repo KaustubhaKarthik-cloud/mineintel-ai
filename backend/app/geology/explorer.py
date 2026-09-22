@@ -339,72 +339,238 @@ def _truncate_evidence(text: str, *, max_len: int = 160) -> str:
     return cleaned[: max_len - 1].rstrip() + "…"
 
 
-def _evidence_heading_lines(evidence: Optional[str]) -> list[str]:
-    """Split evidence into short heading-like lines for display only."""
-    if not evidence:
-        return []
-    raw_lines = re.split(r"[\r\n]+|(?<=[.!?])\s+(?=[A-Z])", evidence.strip())
-    lines: list[str] = []
-    for line in raw_lines:
-        s = re.sub(r"\s+", " ", line).strip(" ·\t-–—")
-        if not s:
+def _title_words(text: str) -> str:
+    parts = re.split(r"[\s_]+", (text or "").strip())
+    small = {"of", "the", "and", "in", "on", "for", "to", "a", "an"}
+    out: list[str] = []
+    for i, p in enumerate(parts):
+        if not p:
             continue
-        # Skip very long body sentences as headings
-        if len(s) > 80:
-            continue
-        lines.append(s)
-        if len(lines) >= 6:
-            break
-    return lines
+        low = p.lower()
+        if i > 0 and low in small:
+            out.append(low)
+        elif p.isupper() and len(p) <= 4:
+            out.append(p)
+        else:
+            out.append(p[:1].upper() + p[1:].lower() if len(p) > 1 else p.upper())
+    return " ".join(out)
+
+
+def _humanize_metric_kind(kind: Optional[str]) -> Optional[str]:
+    if not kind:
+        return None
+    aliases = {
+        RESOURCE_QUANTITY: "Coal Resource",
+        "resource": "Coal Resource",
+        RESERVE_QUANTITY: "Coal Reserve",
+        "reserve": "Coal Reserve",
+        MINIMUM_WORKABLE_SEAM_THICKNESS: "Minimum Workable Seam Thickness",
+        SEAM_THICKNESS: "Seam Thickness",
+        FORMATION_THICKNESS: "Formation Thickness",
+        FORMATION: "Formation",
+        SEAM: "Seam",
+        BOREHOLE: "Borehole",
+        BOREHOLE_DEPTH: "Borehole Depth",
+        SEAM_DEPTH: "Seam Depth",
+        LITHOLOGY: "Lithology",
+        COAL_QUALITY: "Coal Quality",
+        "geological_structure": "Geological Structure",
+    }
+    if kind in aliases:
+        return aliases[kind]
+    return _title_words(kind.replace("_", " "))
+
+
+# Material / concept tokens that describe metric TYPE, not a measured value.
+_BARE_TYPE_TOKENS = frozenset(
+    {
+        "coal",
+        "lignite",
+        "resource",
+        "resources",
+        "reserve",
+        "reserves",
+        "seam",
+        "seams",
+        "formation",
+        "thickness",
+        "borehole",
+        "boreholes",
+        "lithology",
+        "sandstone",
+        "shale",
+        "geological",
+        "geology",
+    }
+)
+
+
+def _is_bare_type_token(text: Optional[str]) -> bool:
+    """True when text is only a geological type/material word, not a value."""
+    if not text:
+        return False
+    cleaned = re.sub(r"\s+", " ", str(text).strip()).strip(" .;:,")
+    if not cleaned:
+        return False
+    # Allow "Barakar Formation" / "Seam R4" / quantities through
+    if re.search(r"\d", cleaned):
+        return False
+    if len(cleaned.split()) >= 3:
+        return False
+    tokens = [t.lower() for t in re.findall(r"[A-Za-z]+", cleaned)]
+    if not tokens:
+        return False
+    return all(t in _BARE_TYPE_TOKENS for t in tokens)
+
+
+def _entity_from_document(doc: Optional[Document]) -> Optional[str]:
+    """Humanize document filename into a block/project entity label (display only)."""
+    if not doc:
+        return None
+    raw = (doc.original_filename or doc.filename or "").strip()
+    if not raw:
+        return None
+    stem = re.sub(r"\.[A-Za-z0-9]+$", "", raw)
+    stem = stem.replace("-", " ").replace("_", " ")
+    stem = re.sub(r"\bG-?\d\b", " ", stem, flags=re.I)
+    stem = re.sub(r"\s+", " ", stem).strip()
+    if not stem or len(stem) < 3:
+        return None
+    # Skip UUID / hash-like names
+    compact = re.sub(r"\s+", "", stem)
+    if re.fullmatch(r"[0-9a-fA-F]{16,}", compact):
+        return None
+    return _title_words(stem)
+
+
+def _format_quantity(num: str, unit: Optional[str]) -> str:
+    num = (num or "").strip()
+    unit = (unit or "").strip()
+    if not unit:
+        return num
+    if re.search(r"(?i)^mt$|^million", unit):
+        return f"{num} MT"
+    return f"{num} {unit}"
 
 
 def _display_fields_from_evidence(evidence: Optional[str]) -> dict[str, Any]:
-    """Presentation-only fallbacks from evidence_text. Never invents verified facts."""
+    """Presentation-only Entity/Metric/Value fallbacks from evidence_text.
+
+    Never invents verified facts. Prefers Not available over wrong column placement.
+    """
     text = (evidence or "").strip()
+    empty = {
+        "display_entity": None,
+        "display_metric": None,
+        "display_value": None,
+        "display_from_evidence": False,
+        "evidence_preview": None,
+        "coordinate_evidence_only": False,
+    }
     if not text:
-        return {
-            "display_entity": None,
-            "display_metric": None,
-            "display_value": None,
-            "display_from_evidence": False,
-            "evidence_preview": None,
-        }
+        return empty
 
     annotated = annotate_evidence_display(text) or text
     preview = _truncate_evidence(annotated)
-    lines = _evidence_heading_lines(annotated)
+    entity: Optional[str] = None
+    metric: Optional[str] = None
+    value: Optional[str] = None
+    coord_only = False
 
-    entity = None
-    metric = None
-    value = None
-
-    # Prefer recognizable location / coordinate section labels when present
-    joined = " ".join(lines) if lines else annotated
-    loc_m = re.search(
-        r"(?i)\b(location\s*(?:&|and)?\s*accessibility|location|accessibility)\b",
-        joined,
+    # --- Resource / reserve quantity ---
+    # Optional seam id before resource → "Seam R4 Resource"
+    # Require an explicit mass unit so TOC page numbers ("Reserves 65") are not values.
+    seam_res_m = re.search(
+        r"(?i)\bseam\s+([A-Z]?\d{1,3}[A-Za-z]?|[IVXLC]{1,6})\s+"
+        r"(resources?|reserves?)\b"
+        r"(?:\s+(?:of\s+(?:the\s+)?(?:block|area)|estimated(?:\s+at)?|is|are))?"
+        r"\s*[=:]?\s*"
+        r"(\d+(?:[.,]\d+)?)\s*(MT|Mt|mt|million\s*tonnes?|t|tonnes?|kg)\b",
+        annotated,
     )
-    coord_m = re.search(
-        r"(?i)\b(cardinal\s+point\s+coordinates|coordinates?|latitude|longitude)\b",
-        joined,
+    res_m = re.search(
+        r"(?i)\b((?:coal|lignite|geological)\s+)?(resources?|reserves?)\b"
+        r"(?:\s+(?:of\s+(?:the\s+)?(?:block|area)|estimated(?:\s+at)?|is|are))?"
+        r"\s*[=:]?\s*"
+        r"(\d+(?:[.,]\d+)?)\s*(MT|Mt|mt|million\s*tonnes?|t|tonnes?|kg)\b",
+        annotated,
     )
-    if loc_m:
-        # Use the matching phrase as entity when it looks like a section title
-        for line in lines:
-            if re.search(r"(?i)location|accessibility", line) and len(line) <= 60:
-                entity = line
-                break
-        if not entity:
-            entity = "Location & Accessibility"
-    if coord_m:
-        for line in lines:
-            if re.search(r"(?i)cardinal|coordinate|latitude|longitude", line) and len(line) <= 60:
-                metric = line
-                break
-        if not metric:
-            metric = "Cardinal Point Coordinates"
+    if seam_res_m and seam_res_m.group(3):
+        noun = "Reserve" if seam_res_m.group(2).lower().startswith("reserve") else "Resource"
+        metric = f"Seam {seam_res_m.group(1)} {noun}"
+        value = _format_quantity(seam_res_m.group(3).replace(",", ""), seam_res_m.group(4))
+    elif res_m and res_m.group(3):
+        material = (res_m.group(1) or "").strip()
+        kind_word = res_m.group(2).lower()
+        noun = "Reserve" if kind_word.startswith("reserve") else "Resource"
+        if material:
+            metric = _title_words(f"{material} {noun}")
+        else:
+            metric = noun
+        value = _format_quantity(res_m.group(3).replace(",", ""), res_m.group(4))
 
-    # Pull latitude/longitude snippets for value display only (not map-verified)
+    # --- Minimum workable / thickness with measure ---
+    if not metric or not value:
+        thick_m = re.search(
+            r"(?i)\b(minimum\s+workable\s+(?:seam\s+)?thickness|"
+            r"workable\s+(?:seam\s+)?thickness|"
+            r"seam\s+thickness|"
+            r"formation\s+thickness|"
+            r"thickness)\b"
+            r"(?:\s*(?:is|of|considered|=|:))?\s*"
+            r"(\d+(?:[.,]\d+)?)\s*(m|cm|mm|metres?|meters?)?",
+            annotated,
+        )
+        if thick_m:
+            label = thick_m.group(1)
+            if re.search(r"(?i)minimum\s+workable", label):
+                metric = metric or "Minimum Workable Seam Thickness"
+            elif re.search(r"(?i)workable", label):
+                metric = metric or "Workable Seam Thickness"
+            elif re.search(r"(?i)seam\s+thickness", label):
+                metric = metric or "Seam Thickness"
+            elif re.search(r"(?i)formation\s+thickness", label):
+                metric = metric or "Formation Thickness"
+            else:
+                metric = metric or "Thickness"
+            if not value:
+                value = _format_quantity(thick_m.group(2).replace(",", ""), thick_m.group(3) or "m")
+
+    # --- Formation identity ---
+    if not value:
+        form_m = re.search(
+            r"(?i)\b([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\s+Formation\b",
+            annotated,
+        )
+        if form_m:
+            metric = metric or "Formation"
+            value = f"{form_m.group(1)} Formation"
+
+    # --- Borehole identity ---
+    if not value:
+        bh_m = re.search(
+            r"(?i)\bboreholes?\s*[:\-]?\s*([A-Z]{1,4}[-/]?\d{1,4}[A-Za-z]?)\b",
+            annotated,
+        )
+        if bh_m:
+            metric = metric or "Borehole"
+            value = bh_m.group(1).upper() if bh_m.group(1).islower() else bh_m.group(1)
+
+    # --- Seam identity ---
+    if not value:
+        seam_m = re.search(
+            r"(?i)\bseams?\s+([A-Z]\d{1,3}[A-Za-z]?|\d{1,2}[A-Za-z]?|[IVXLC]{1,6})\b",
+            annotated,
+        )
+        if seam_m:
+            sid = seam_m.group(1)
+            # Reject English filler and TOC page-like numbers after "Seam"
+            if sid.lower() not in {"of", "up", "to", "in", "the", "and", "a", "or", "by"}:
+                if not (sid.isdigit() and int(sid) > 30):
+                    metric = metric or "Seam"
+                    value = f"Seam {sid}" if not sid.lower().startswith("seam") else sid
+
+    # --- Coordinates (evidence only; never map-verified here) ---
     lat = re.search(
         r"(?i)\blatitude\s*[=:]?\s*[+-]?\d{1,2}(?:\.\d+)?\s*°?\s*[nNsS]?",
         annotated,
@@ -414,37 +580,204 @@ def _display_fields_from_evidence(evidence: Optional[str]) -> dict[str, Any]:
         annotated,
     )
     if lat or lon:
+        coord_only = True
+        metric = metric or "Cardinal Point Coordinates"
         parts = []
         if lat:
             parts.append(lat.group(0).strip())
         if lon:
             parts.append(lon.group(0).strip())
-        value = "; ".join(parts)
+        if not value:
+            value = "; ".join(parts)
+        if re.search(r"(?i)location\s*(?:&|and)?\s*accessibility", annotated):
+            entity = entity or "Location & Accessibility"
 
-    # Generic heading fallbacks when no location/coord labels
-    if not entity and lines:
-        entity = lines[0]
-    if not metric and len(lines) >= 2:
-        metric = lines[1]
-    if not value and len(lines) >= 3:
-        value = lines[2]
-    if not value:
-        value = preview
-
-    # Safe labels when we only have raw evidence
-    if not entity:
-        entity = "Detected evidence"
+    # --- Resource/type mentioned without a quantity ---
     if not metric:
-        metric = "Source evidence"
+        type_m = re.search(
+            r"(?i)\b((?:coal|lignite|geological)\s+)?(resources?|reserves?)\b",
+            annotated,
+        )
+        if type_m and not value:
+            material = (type_m.group(1) or "").strip()
+            kind_word = type_m.group(2).lower()
+            noun = "Reserve" if kind_word.startswith("reserve") else "Resource"
+            metric = _title_words(f"{material} {noun}") if material else noun
+            # Do not put "Coal" / "Resource" into Value
+            value = None
+
+    if not metric and _is_bare_type_token(annotated):
+        # e.g. evidence is just "Coal" — metric hint only, never Value=Coal
+        low = annotated.strip().lower()
+        if low in {"coal", "lignite"}:
+            metric = _title_words(low)
+        elif "resource" in low:
+            metric = "Resource"
+        elif "reserve" in low:
+            metric = "Reserve"
+        elif "seam" in low:
+            metric = "Seam"
+        elif "formation" in low:
+            metric = "Formation"
+        elif "borehole" in low:
+            metric = "Borehole"
+        elif "thickness" in low:
+            metric = "Thickness"
+        value = None
+
+    # Long prose fallback: keep readable evidence in Value only when it is not a bare type
+    if metric and value is None and not _is_bare_type_token(annotated):
+        # Metric known but no quantity — prefer Not available over dumping type words
+        if not re.search(r"\d", annotated):
+            value = None
+        elif not _is_bare_type_token(preview) and len(preview.split()) >= 4:
+            # Only use preview when it looks like substantive evidence, not "Coal resources of…"
+            if not re.search(
+                r"(?i)^(coal|lignite)\s+resources?\b",
+                preview,
+            ):
+                value = preview
+
+    if not metric and not value and not _is_bare_type_token(annotated):
+        # Skip cover/TOC OCR noise — prefer Not available over dumping headers as Value
+        if re.search(
+            r"(?i)\b(strictly\s+restricted|particulars\s+page\s+no|"
+            r"contents\s+contents|subsidiary\s+of\s+coal\s+india|"
+            r"list\s+of\s+annexure|list\s+of\s+plates)\b",
+            annotated,
+        ):
+            metric = None
+            value = None
+        elif len(re.findall(r"[A-Za-z0-9]+", annotated)) >= 4:
+            # Unparsed multi-word evidence — safe source-evidence fallback
+            metric = "Source evidence"
+            value = preview
+            entity = entity or "Detected evidence"
+        else:
+            metric = None
+            value = None
 
     return {
         "display_entity": entity,
         "display_metric": metric,
         "display_value": value,
-        "display_from_evidence": True,
+        "display_from_evidence": bool(metric or value or entity),
         "evidence_preview": preview,
-        # Coordinate-looking text shown as evidence only — map pipeline untouched
-        "coordinate_evidence_only": bool(lat or lon),
+        "coordinate_evidence_only": coord_only,
+    }
+
+
+def _structured_display_fields(
+    row: GeologicalFact,
+    *,
+    kind: Optional[str],
+    formation: Optional[str],
+    seam: Optional[str],
+) -> dict[str, Any]:
+    """Map existing GeologicalFact columns into Entity/Metric/Value display slots."""
+    display_metric: Optional[str] = None
+    display_value: Optional[str] = None
+    display_unit: Optional[str] = None
+    structured_value = False
+
+    # Measured / corrected values first
+    if row.corrected_value and not _is_bare_type_token(str(row.corrected_value)):
+        display_value = str(row.corrected_value)
+        display_unit = row.corrected_unit or row.original_unit
+        structured_value = True
+    elif row.original_value and not _is_bare_type_token(str(row.original_value)):
+        display_value = str(row.original_value)
+        display_unit = row.original_unit
+        structured_value = True
+    elif row.thickness_min and row.thickness_max:
+        display_value = f"{row.thickness_min}–{row.thickness_max}"
+        display_unit = row.thickness_unit
+        structured_value = True
+    elif row.thickness:
+        display_value = str(row.thickness)
+        display_unit = row.thickness_unit
+        structured_value = True
+    elif row.depth_min and row.depth_max:
+        display_value = f"{row.depth_min}–{row.depth_max}"
+        display_unit = row.depth_unit
+        structured_value = True
+    elif row.depth:
+        display_value = str(row.depth)
+        display_unit = row.depth_unit
+        structured_value = True
+    elif row.coal_quality_value:
+        display_value = str(row.coal_quality_value)
+        display_unit = row.coal_quality_unit
+        structured_value = True
+
+    # Resource quantity helper (structured or evidence-backed quantity only)
+    if not display_value:
+        res_val, res_unit, _ = resource_value_from_fact(row)
+        if res_val:
+            display_value = _format_quantity(str(res_val), res_unit)
+            display_unit = None  # already embedded in display_value
+            structured_value = True
+            display_metric = display_metric or _humanize_metric_kind(
+                kind
+                if kind in {RESOURCE_QUANTITY, RESERVE_QUANTITY, "resource", "reserve"}
+                else RESOURCE_QUANTITY
+            )
+
+    # Metric from stored kind / coal quality parameter
+    if kind:
+        display_metric = display_metric or _humanize_metric_kind(kind)
+    if row.coal_quality_parameter and not display_metric:
+        display_metric = row.coal_quality_parameter
+
+    # Identity fields → Metric type + Value name (not Entity)
+    if formation and (
+        kind in {FORMATION, FORMATION_THICKNESS, None}
+        or not display_value
+        or kind == FORMATION
+    ):
+        if kind in {FORMATION, None} or (not structured_value and formation):
+            if kind == FORMATION or (not kind and not structured_value):
+                display_metric = display_metric or "Formation"
+                if not display_value:
+                    display_value = formation
+                    structured_value = True
+            elif kind == FORMATION_THICKNESS and not display_value:
+                display_metric = display_metric or "Formation Thickness"
+
+    if seam and (kind in {SEAM, SEAM_THICKNESS, MINIMUM_WORKABLE_SEAM_THICKNESS, None} or not display_value):
+        if kind == SEAM or (not kind and not structured_value and not formation):
+            display_metric = display_metric or "Seam"
+            if not display_value:
+                display_value = seam if seam.lower().startswith("seam") else f"Seam {seam}"
+                # Avoid "Seam Seam R4"
+                if re.match(r"(?i)^seam\s+seam\b", display_value):
+                    display_value = seam
+                structured_value = True
+        elif kind in {SEAM_THICKNESS, MINIMUM_WORKABLE_SEAM_THICKNESS}:
+            display_metric = display_metric or _humanize_metric_kind(kind)
+
+    if row.borehole_id and (kind in {BOREHOLE, BOREHOLE_DEPTH, None} or not display_value):
+        if kind == BOREHOLE or (not kind and not structured_value and not formation and not seam):
+            display_metric = display_metric or "Borehole"
+            if not display_value:
+                display_value = row.borehole_id
+                structured_value = True
+        elif kind == BOREHOLE_DEPTH:
+            display_metric = display_metric or "Borehole Depth"
+
+    # Lithology is a classified field ONLY when metric_kind says so.
+    # Bare lithology="Coal" on unrelated rows must NOT become Value.
+    if kind == LITHOLOGY and row.lithology:
+        display_metric = display_metric or "Lithology"
+        if not display_value:
+            display_value = row.lithology
+            structured_value = True
+
+    return {
+        "display_metric": display_metric,
+        "display_value": display_value,
+        "display_unit": display_unit,
+        "structured_value": structured_value,
     }
 
 
@@ -458,61 +791,36 @@ def fact_to_explorer_item(
     seam = _seam_label(row)
     meta = _doc_meta(doc)
     bucket = _status_bucket(row.status)
-    display_value = None
-    display_unit = None
-    if row.corrected_value:
-        display_value = row.corrected_value
-        display_unit = row.corrected_unit or row.original_unit
-    elif row.original_value:
-        display_value = row.original_value
-        display_unit = row.original_unit
-    elif row.thickness_min and row.thickness_max:
-        display_value = f"{row.thickness_min}–{row.thickness_max}"
-        display_unit = row.thickness_unit
-    elif row.thickness:
-        display_value = str(row.thickness)
-        display_unit = row.thickness_unit
-    elif row.depth_min and row.depth_max:
-        display_value = f"{row.depth_min}–{row.depth_max}"
-        display_unit = row.depth_unit
-    elif row.depth:
-        display_value = str(row.depth)
-        display_unit = row.depth_unit
-    elif formation:
-        display_value = formation
-    elif seam:
-        display_value = seam
-    elif row.borehole_id:
-        display_value = row.borehole_id
-    elif row.lithology:
-        display_value = row.lithology
-    elif row.coal_quality_value:
-        display_value = str(row.coal_quality_value)
-        display_unit = row.coal_quality_unit
 
-    # Structured entity / metric when available
-    display_entity = seam or formation or row.borehole_id or None
-    display_metric = kind.replace("_", " ") if kind else None
-    if row.coal_quality_parameter and not display_metric:
-        display_metric = row.coal_quality_parameter
+    structured = _structured_display_fields(row, kind=kind, formation=formation, seam=seam)
+    display_metric = structured["display_metric"]
+    display_value = structured["display_value"]
+    display_unit = structured["display_unit"]
 
+    # Entity = block/project the fact belongs to (document), not seam/formation/lithology
+    display_entity = _entity_from_document(doc)
     evidence_fields = _display_fields_from_evidence(row.evidence_text)
     display_from_evidence = False
+
     if not display_entity:
         if evidence_fields.get("display_entity"):
             display_entity = evidence_fields["display_entity"]
             display_from_evidence = True
         else:
             display_entity = "Not available"
+
+    # Fill missing metric/value from evidence only — never overwrite structured values
     if not display_metric:
         if evidence_fields.get("display_metric"):
             display_metric = evidence_fields["display_metric"]
             display_from_evidence = True
         else:
             display_metric = "Not available"
+
     if not display_value:
-        if evidence_fields.get("display_value"):
-            display_value = evidence_fields["display_value"]
+        ev_val = evidence_fields.get("display_value")
+        if ev_val and not _is_bare_type_token(str(ev_val)):
+            display_value = ev_val
             display_from_evidence = True
         else:
             display_value = "Not available"
