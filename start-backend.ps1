@@ -1,9 +1,9 @@
-# MineIntel AI — start FastAPI backend (Windows PowerShell)
+# MineIntel AI - start FastAPI backend (Windows PowerShell)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\backend
 
 function Get-MineIntelPython {
-  # Prefer an explicit supported interpreter (3.10–3.12; 3.11 recommended).
+  # Prefer an explicit supported interpreter (3.10-3.12; 3.11 recommended).
   $candidates = @()
   foreach ($ver in @("3.11", "3.12", "3.10")) {
     try {
@@ -53,7 +53,7 @@ if (-not (Test-Path .\.venv\Scripts\Activate.ps1)) {
   .\.venv\Scripts\python.exe -m pip install --upgrade pip
   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
   if ($LASTEXITCODE -ne 0) {
-    Write-Host "pip install failed. Confirm Python is 3.10–3.12 and retry." -ForegroundColor Red
+    Write-Host "pip install failed. Confirm Python is 3.10-3.12 and retry." -ForegroundColor Red
     exit $LASTEXITCODE
   }
 } else {
