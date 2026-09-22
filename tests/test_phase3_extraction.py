@@ -147,16 +147,16 @@ def test_confidence_and_thresholds():
     assert classify_status(0.41) == "review_required"
 
 
-def test_low_confidence_creates_review(client, ocr_like_pdf: Path, db_session):
+def test_low_confidence_creates_review(client, ocr_like_pdf: Path, db_session, admin_headers):
     up = _upload(client, ocr_like_pdf, "noisy_ocr.pdf", "application/pdf")
     doc_id = up.json()["id"]
     client.post(f"/api/documents/{doc_id}/extract")
-    reviews = client.get("/api/reviews").json()
+    reviews = client.get("/api/reviews", headers=admin_headers).json()
     assert reviews["pending"] >= 1
     assert any(i["document_id"] == doc_id for i in reviews["items"])
 
 
-def test_human_approve_correct_reject(client, annual_pdf: Path, db_session):
+def test_human_approve_correct_reject(client, annual_pdf: Path, db_session, admin_headers):
     # Force review by lowering confidence via ambiguous OCR-like provider response
     class LowConfProvider(MockLLMProvider):
         def extract_structured_information(self, document_name, pages):
@@ -194,17 +194,18 @@ def test_human_approve_correct_reject(client, annual_pdf: Path, db_session):
     assert ext.status_code == 200, ext.text
     assert ext.json()["job"]["review_count"] >= 1
 
-    items = [i for i in client.get("/api/reviews").json()["items"] if i["document_id"] == doc_id and i["status"] == "pending"]
+    items = [i for i in client.get("/api/reviews", headers=admin_headers).json()["items"] if i["document_id"] == doc_id and i["status"] == "pending"]
     assert len(items) >= 1
     a = items[0]
     b = items[1] if len(items) > 1 else items[0]
 
-    ok = client.post(f"/api/reviews/{a['id']}/approve")
+    ok = client.post(f"/api/reviews/{a['id']}/approve", headers=admin_headers)
     assert ok.status_code == 200
     assert ok.json()["status"] == "approved"
 
     corr = client.post(
         f"/api/reviews/{b['id']}/correct",
+        headers=admin_headers,
         json={
             "action": "correct",
             "corrected_value": "4.0",

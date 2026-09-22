@@ -120,10 +120,18 @@ def test_excel_processor_unit(production_xlsx: Path):
 
 
 def test_image_ocr(client, sample_png: Path):
-    fake_text = "Mine B produced 3.9 MT in FY2024"
+    from app.document_processing.ocr_processor import OCRResult
+
+    fake = OCRResult(
+        text="Mine B produced 3.9 MT in FY2024",
+        mean_confidence=90.0,
+        word_count=6,
+        engine="tesseract",
+        page=1,
+    )
     with patch(
-        "app.document_processing.image_processor.ocr_image_path",
-        return_value=fake_text,
+        "app.document_processing.image_processor.ocr_pil_image_detailed",
+        return_value=fake,
     ):
         with sample_png.open("rb") as f:
             r = client.post(

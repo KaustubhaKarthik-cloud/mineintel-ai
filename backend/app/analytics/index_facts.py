@@ -199,35 +199,48 @@ def index_facts_as_hits(facts: list[IndexFact]) -> list[StructuredFactHit]:
                 evidence_text=f.evidence_text,
                 fact_id=f.chunk_id,
                 confidence=f.confidence,
+                measurement_type=f.measurement_type,
             )
         )
     return hits
 
 
 def list_analytics_documents(db: Session) -> list[dict[str, Any]]:
-    """Documents that have structured facts and/or verified extracted facts."""
+    """Documents with production STRUCTURED_FACT and/or GeologicalFact rows.
+
+    Geological exploration reports often have zero ExtractedFact / STRUCTURED_FACT
+    rows but still have structured GeologicalFact evidence — those must count.
+    """
+    from app.analytics.geological_adapter import geological_document_counts
+    from sqlalchemy import func
+
     docs = db.query(Document).order_by(Document.created_at.desc()).all()
-    chunk_doc_ids = {
-        r[0]
-        for r in db.query(DocumentChunk.document_id)
+    # Batch production structured_fact counts (avoid N+1)
+    prod_rows = (
+        db.query(DocumentChunk.document_id, func.count(DocumentChunk.id))
         .filter(
             DocumentChunk.is_active.is_(True),
             DocumentChunk.content_type == "structured_fact",
         )
-        .distinct()
+        .group_by(DocumentChunk.document_id)
         .all()
-    }
+    )
+    prod_counts = {doc_id: int(cnt) for doc_id, cnt in prod_rows if doc_id}
+    geo_counts = geological_document_counts(db)
     out = []
     for d in docs:
-        fact_count = (
-            db.query(DocumentChunk)
-            .filter(
-                DocumentChunk.document_id == d.id,
-                DocumentChunk.is_active.is_(True),
-                DocumentChunk.content_type == "structured_fact",
-            )
-            .count()
-        )
+        fact_count = int(prod_counts.get(d.id, 0))
+        geo_count = int(geo_counts.get(d.id, 0))
+        has_prod = fact_count > 0
+        has_geo = geo_count > 0
+        if has_prod and has_geo:
+            domain = "mixed"
+        elif has_geo:
+            domain = "geological"
+        elif has_prod:
+            domain = "production"
+        else:
+            domain = None
         out.append(
             {
                 "id": d.id,
@@ -236,8 +249,11 @@ def list_analytics_documents(db: Session) -> list[dict[str, Any]]:
                 "status": d.status,
                 "page_count": d.page_count,
                 "index_status": d.index_status,
-                "structured_fact_count": fact_count,
-                "has_structured_data": d.id in chunk_doc_ids or fact_count > 0,
+                "structured_fact_count": fact_count + geo_count,
+                "production_fact_count": fact_count,
+                "geological_fact_count": geo_count,
+                "domain": domain,
+                "has_structured_data": has_prod or has_geo,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
         )

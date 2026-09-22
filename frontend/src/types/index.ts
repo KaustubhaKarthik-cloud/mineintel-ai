@@ -142,6 +142,7 @@ export interface ReviewItem {
   document_id: string
   document_name?: string | null
   extracted_fact_id?: string | null
+  geological_fact_id?: string | null
   field_name: string
   extracted_value?: string | null
   corrected_value?: string | null

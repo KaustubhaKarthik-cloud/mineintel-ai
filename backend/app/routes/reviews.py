@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.deps import AuthUser, require_permission
 from app.database import get_db
+from app.geology.review import sync_geological_review_queue
 from app.models import FactCorrectionHistory, ReviewItem, ReviewStatus
 from app.schemas import ReviewAction, ReviewItemOut, ReviewListResponse
 from app.services import demo_data
@@ -25,6 +26,7 @@ def _to_out(item: ReviewItem) -> ReviewItemOut:
         document_id=item.document_id,
         document_name=item.source_document,
         extracted_fact_id=item.extracted_fact_id,
+        geological_fact_id=item.geological_fact_id,
         field_name=item.field_name,
         extracted_value=item.extracted_value,
         corrected_value=item.corrected_value,
@@ -68,15 +70,25 @@ def list_reviews(
     db: Session = Depends(get_db),
     user: AuthUser = Depends(require_permission("review.act")),
 ) -> ReviewListResponse:
-    items = db.query(ReviewItem).order_by(desc(ReviewItem.created_at)).all()
-    if items:
-        out = [_to_out(i) for i in items]
-        pending = sum(1 for i in out if i.status == ReviewStatus.PENDING.value)
-        return ReviewListResponse(total=len(out), pending=pending, items=out)
+    # Bridge geological review_required facts into the shared ReviewItem queue.
+    sync_geological_review_queue(db)
 
-    demo = [ReviewItemOut(**r) for r in demo_data.DEMO_REVIEWS]
-    pending = sum(1 for r in demo if r.status == "pending")
-    return ReviewListResponse(total=len(demo), pending=pending, items=demo)
+    pending_items = (
+        db.query(ReviewItem)
+        .filter(ReviewItem.status == ReviewStatus.PENDING.value)
+        .order_by(desc(ReviewItem.created_at))
+        .all()
+    )
+    if pending_items:
+        out = [_to_out(i) for i in pending_items]
+        return ReviewListResponse(total=len(out), pending=len(out), items=out)
+
+    # Real review rows exist (all resolved) → empty queue, not demo data.
+    if db.query(ReviewItem.id).first() is not None:
+        return ReviewListResponse(total=0, pending=0, items=[])
+
+    demo = [ReviewItemOut(**r) for r in demo_data.DEMO_REVIEWS if r.get("status") == "pending"]
+    return ReviewListResponse(total=len(demo), pending=len(demo), items=demo)
 
 
 @router.get("/corrections/history")

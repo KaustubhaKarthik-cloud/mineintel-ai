@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth.deps import ROLE_PERMISSIONS, AuthUser, get_current_user, get_optional_user
+from app.auth.deps import ROLE_PERMISSIONS, AuthUser, get_current_user, get_optional_user, normalize_role
 from app.auth.security import create_access_token, verify_password
 from app.config import get_settings
 from app.database import get_db
-from app.models import User, UserStatus
+from app.models import User, UserRole, UserStatus
 from app.services.audit import write_audit
 
 router = APIRouter()
@@ -31,15 +31,16 @@ class LoginResponse(BaseModel):
 
 
 def _user_public(u: User) -> dict[str, Any]:
+    role = normalize_role(u.role)
     return {
         "id": u.id,
         "username": u.username,
         "display_name": u.display_name,
-        "role": u.role,
+        "role": role,
         "status": u.status,
         "created_at": u.created_at.isoformat() if u.created_at else None,
         "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
-        "permissions": sorted(ROLE_PERMISSIONS.get(u.role, set())),
+        "permissions": sorted(ROLE_PERMISSIONS.get(role, set())),
     }
 
 
@@ -74,14 +75,17 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)) -
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is disabled")
 
     user.last_login_at = datetime.now(timezone.utc)
-    token = create_access_token(user_id=user.id, username=user.username, role=user.role)
+    role = normalize_role(user.role)
+    if user.role != role:
+        user.role = role
+    token = create_access_token(user_id=user.id, username=user.username, role=role)
     write_audit(
         db,
         action="LOGIN",
         actor=user.username,
         entity_type="user",
         entity_id=user.id,
-        details={"role": user.role},
+        details={"role": role},
         ip_address=request.client.host if request.client else None,
         commit=True,
     )
@@ -98,12 +102,12 @@ def me(
         return {
             "id": "anonymous",
             "username": user.username,
-            "display_name": "Demo Analyst",
-            "role": user.role,
+            "display_name": user.display_name or "Anonymous User",
+            "role": UserRole.USER.value,
             "status": "active",
             "auth_required": settings.auth_required,
             "anonymous": True,
-            "permissions": sorted(ROLE_PERMISSIONS.get(user.role, set())),
+            "permissions": sorted(ROLE_PERMISSIONS.get(UserRole.USER.value, set())),
         }
     row = db.query(User).filter(User.id == user.id).first()
     if not row:

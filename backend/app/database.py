@@ -67,6 +67,7 @@ def _sqlite_add_missing_columns() -> None:
         rev_cols = {c["name"] for c in insp.get_columns("review_items")}
         rev_alters = [
             ("extracted_fact_id", "ALTER TABLE review_items ADD COLUMN extracted_fact_id VARCHAR(36)"),
+            ("geological_fact_id", "ALTER TABLE review_items ADD COLUMN geological_fact_id VARCHAR(36)"),
             ("original_unit", "ALTER TABLE review_items ADD COLUMN original_unit VARCHAR(64)"),
             ("corrected_unit", "ALTER TABLE review_items ADD COLUMN corrected_unit VARCHAR(64)"),
             ("entity_name", "ALTER TABLE review_items ADD COLUMN entity_name VARCHAR(256)"),

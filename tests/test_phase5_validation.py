@@ -98,19 +98,19 @@ def test_rounding_tolerance_no_conflict():
     assert not cmp.conflict
 
 
-def test_no_conflict_same_values(client, digital_pdf, tmp_path, db_session):
+def test_no_conflict_same_values(client, digital_pdf, tmp_path, db_session, admin_headers):
     a, b = _two_docs(client, digital_pdf, tmp_path)
     _seed_fact(db_session, document_id=a, field="production", value=5.2, unit="MT", entity="Mine B", period="FY2024", page=37)
     _seed_fact(db_session, document_id=b, field="production", value=5.2, unit="MT", entity="Mine B", period="FY2024", page=21)
     db_session.commit()
-    r = client.post("/api/validation/run")
+    r = client.post("/api/validation/run", headers=admin_headers)
     assert r.status_code == 200, r.text
-    conflicts = client.get("/api/validation/conflicts").json()["items"]
+    conflicts = client.get("/api/validation/conflicts", headers=admin_headers).json()["items"]
     contra = [c for c in conflicts if c["conflict_type"] == "contradiction"]
     assert contra == []
 
 
-def test_conflict_different_values(client, digital_pdf, tmp_path, db_session):
+def test_conflict_different_values(client, digital_pdf, tmp_path, db_session, admin_headers):
     a, b = _two_docs(client, digital_pdf, tmp_path)
     _seed_fact(
         db_session,
@@ -135,9 +135,9 @@ def test_conflict_different_values(client, digital_pdf, tmp_path, db_session):
         evidence="Production from Mine B was 5.6 MT",
     )
     db_session.commit()
-    r = client.post("/api/validation/run")
+    r = client.post("/api/validation/run", headers=admin_headers)
     assert r.status_code == 200
-    items = client.get("/api/validation/conflicts").json()["items"]
+    items = client.get("/api/validation/conflicts", headers=admin_headers).json()["items"]
     contra = [c for c in items if c["conflict_type"] == "contradiction"]
     assert len(contra) >= 1
     c = contra[0]
@@ -149,15 +149,15 @@ def test_conflict_different_values(client, digital_pdf, tmp_path, db_session):
     assert c["status"] == ConflictStatus.REVIEW_REQUIRED.value
 
 
-def test_no_false_conflict_different_year_or_mine(client, digital_pdf, tmp_path, db_session):
+def test_no_false_conflict_different_year_or_mine(client, digital_pdf, tmp_path, db_session, admin_headers):
     a, b = _two_docs(client, digital_pdf, tmp_path)
     _seed_fact(db_session, document_id=a, field="production", value=4.8, unit="MT", entity="Mine B", period="FY2023")
     _seed_fact(db_session, document_id=b, field="production", value=5.2, unit="MT", entity="Mine B", period="FY2024")
     _seed_fact(db_session, document_id=a, field="production", value=5.2, unit="MT", entity="Mine A", period="FY2024")
     _seed_fact(db_session, document_id=b, field="production", value=5.6, unit="MT", entity="Mine B", period="FY2024")
     db_session.commit()
-    client.post("/api/validation/run")
-    items = client.get("/api/validation/conflicts").json()["items"]
+    client.post("/api/validation/run", headers=admin_headers)
+    items = client.get("/api/validation/conflicts", headers=admin_headers).json()["items"]
     # Mine A vs Mine B should not create A↔A conflict; year difference no conflict
     # Only Mine B FY2024 5.2 vs 5.6 should conflict — wait we seeded Mine A 5.2 on doc a and Mine B 5.6 on doc b
     # and also Mine B FY2023 vs FY2024 - no conflict for years
@@ -172,7 +172,7 @@ def test_no_false_conflict_different_year_or_mine(client, digital_pdf, tmp_path,
     assert all(c["period"] != "FY2023" or c["conflict_type"] != "contradiction" for c in items)
 
 
-def test_reported_vs_calculated_discrepancy(client, digital_pdf, tmp_path, db_session):
+def test_reported_vs_calculated_discrepancy(client, digital_pdf, tmp_path, db_session, admin_headers):
     a, _ = _two_docs(client, digital_pdf, tmp_path)
     _seed_fact(db_session, document_id=a, field="production", value=3.9, unit="MT", entity="Mine B", period="FY2024")
     _seed_fact(
@@ -191,29 +191,30 @@ def test_reported_vs_calculated_discrepancy(client, digital_pdf, tmp_path, db_se
     disc = check_achievement_discrepancy(3.9, 5.0, 82)
     assert disc.detected
     assert disc.calculated == 78.0
-    client.post("/api/validation/run")
-    items = client.get("/api/validation/conflicts").json()["items"]
+    client.post("/api/validation/run", headers=admin_headers)
+    items = client.get("/api/validation/conflicts", headers=admin_headers).json()["items"]
     discs = [c for c in items if c["conflict_type"] == "discrepancy"]
     assert discs
     labels = {e["label"] for e in discs[0]["evidence"]}
     assert "reported" in labels and "calculated" in labels
 
 
-def test_conflict_confirm_resolve_dismiss_audit(client, digital_pdf, tmp_path, db_session):
+def test_conflict_confirm_resolve_dismiss_audit(client, digital_pdf, tmp_path, db_session, admin_headers):
     a, b = _two_docs(client, digital_pdf, tmp_path)
     _seed_fact(db_session, document_id=a, field="production", value=5.2, unit="MT", entity="Mine B", period="FY2024")
     _seed_fact(db_session, document_id=b, field="production", value=5.6, unit="MT", entity="Mine B", period="FY2024")
     db_session.commit()
-    client.post("/api/validation/run")
-    cid = client.get("/api/validation/conflicts").json()["items"][0]["id"]
+    client.post("/api/validation/run", headers=admin_headers)
+    cid = client.get("/api/validation/conflicts", headers=admin_headers).json()["items"][0]["id"]
 
-    conf = client.post(f"/api/validation/conflicts/{cid}/confirm", json={"notes": "real conflict"})
+    conf = client.post(f"/api/validation/conflicts/{cid}/confirm", headers=admin_headers, json={"notes": "real conflict"})
     assert conf.status_code == 200
     assert conf.json()["status"] == "confirmed"
 
     # create another conflict pair for resolve/dismiss flows via re-seed different docs
     res = client.post(
         f"/api/validation/conflicts/{cid}/resolve",
+        headers=admin_headers,
         json={"selected_value": "5.2", "selected_unit": "MT", "reason": "Prefer annual report"},
     )
     assert res.status_code == 200
@@ -231,16 +232,16 @@ def test_conflict_confirm_resolve_dismiss_audit(client, digital_pdf, tmp_path, d
     _seed_fact(db_session, document_id=a, field="dispatch", value=1.0, unit="MT", entity="Mine B", period="FY2024")
     _seed_fact(db_session, document_id=b, field="dispatch", value=2.0, unit="MT", entity="Mine B", period="FY2024")
     db_session.commit()
-    client.post("/api/validation/run")
-    items = [c for c in client.get("/api/validation/conflicts").json()["items"] if c["field_name"] == "dispatch"]
+    client.post("/api/validation/run", headers=admin_headers)
+    items = [c for c in client.get("/api/validation/conflicts", headers=admin_headers).json()["items"] if c["field_name"] == "dispatch"]
     assert items
     did = items[0]["id"]
-    d = client.post(f"/api/validation/conflicts/{did}/dismiss", json={"reason": "OCR glitch"})
+    d = client.post(f"/api/validation/conflicts/{did}/dismiss", headers=admin_headers, json={"reason": "OCR glitch"})
     assert d.status_code == 200
     assert d.json()["status"] == "dismissed"
 
 
-def test_validation_stats_and_search_conflict_metadata(client, digital_pdf, tmp_path, db_session):
+def test_validation_stats_and_search_conflict_metadata(client, digital_pdf, tmp_path, db_session, admin_headers):
     a, b = _two_docs(client, digital_pdf, tmp_path)
     _seed_fact(
         db_session,
@@ -263,8 +264,8 @@ def test_validation_stats_and_search_conflict_metadata(client, digital_pdf, tmp_
         evidence="Mine B produced 5.6 MT during FY2024",
     )
     db_session.commit()
-    client.post("/api/validation/run")
-    stats = client.get("/api/validation/stats").json()
+    client.post("/api/validation/run", headers=admin_headers)
+    stats = client.get("/api/validation/stats", headers=admin_headers).json()
     assert stats["facts"] >= 2
     assert stats["review_required"] >= 1
 

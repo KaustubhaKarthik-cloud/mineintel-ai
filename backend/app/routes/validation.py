@@ -1,10 +1,11 @@
-"""Phase 5 validation & contradiction review APIs."""
+"""Phase 5 validation & contradiction review APIs — ADMIN only (`validation.act`)."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.auth.deps import AuthUser, require_permission
 from app.database import get_db
 from app.models import ValidationConflict
 from app.schemas import (
@@ -74,7 +75,10 @@ def _to_out(row: ValidationConflict) -> ValidationConflictOut:
 
 
 @router.post("/run", response_model=ValidationRunResponse)
-def validation_run(db: Session = Depends(get_db)) -> ValidationRunResponse:
+def validation_run(
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("validation.act")),
+) -> ValidationRunResponse:
     try:
         result = run_validation(db)
     except Exception as exc:  # noqa: BLE001
@@ -83,7 +87,10 @@ def validation_run(db: Session = Depends(get_db)) -> ValidationRunResponse:
 
 
 @router.get("/stats", response_model=ValidationStatsOut)
-def validation_dashboard_stats(db: Session = Depends(get_db)) -> ValidationStatsOut:
+def validation_dashboard_stats(
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("validation.act")),
+) -> ValidationStatsOut:
     return ValidationStatsOut(**validation_stats(db))
 
 
@@ -92,6 +99,7 @@ def get_conflicts(
     status: str | None = Query(default=None),
     document_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("validation.act")),
 ) -> ConflictListResponse:
     rows = list_conflicts(db, status=status, document_id=document_id)
     items = [_to_out(r) for r in rows]
@@ -99,7 +107,11 @@ def get_conflicts(
 
 
 @router.get("/conflicts/{conflict_id}", response_model=ValidationConflictOut)
-def get_conflict_detail(conflict_id: str, db: Session = Depends(get_db)) -> ValidationConflictOut:
+def get_conflict_detail(
+    conflict_id: str,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("validation.act")),
+) -> ValidationConflictOut:
     row = get_conflict(db, conflict_id)
     if not row:
         raise HTTPException(status_code=404, detail="Conflict not found.")
@@ -111,6 +123,7 @@ def confirm_conflict_endpoint(
     conflict_id: str,
     body: ConflictActionRequest | None = None,
     db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("validation.act")),
 ) -> ValidationConflictOut:
     try:
         row = confirm_conflict(db, conflict_id, notes=(body.notes if body else None))
@@ -124,6 +137,7 @@ def dismiss_conflict_endpoint(
     conflict_id: str,
     body: ConflictActionRequest | None = None,
     db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("validation.act")),
 ) -> ValidationConflictOut:
     try:
         row = dismiss_conflict(db, conflict_id, reason=(body.reason if body else None))
@@ -137,6 +151,7 @@ def resolve_conflict_endpoint(
     conflict_id: str,
     body: ConflictResolveRequest,
     db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("validation.act")),
 ) -> ValidationConflictOut:
     try:
         row = resolve_conflict(

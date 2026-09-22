@@ -36,6 +36,14 @@ from app.geology.metric_kinds import (
     SEAM_THICKNESS,
     metrics_compatible,
 )
+from app.geology.semantic import (
+    COMPARE_CATEGORIES,
+    NO_COMPATIBLE_STRUCTURED,
+    geo_metrics_compatible,
+    normalize_compare_category,
+    normalize_geo_metric,
+    workable_thickness_value_from_fact,
+)
 from app.geology.units import canonicalize_length_unit, parse_number, to_metres
 from app.models import Document, GeologicalFact
 
@@ -96,7 +104,7 @@ def resources_by_seam(
     use = official if official else display
     if not use:
         return _empty_analytic(
-            "No compatible structured evidence available.",
+            NO_COMPATIBLE_STRUCTURED,
             pending=False,
         )
 
@@ -134,7 +142,7 @@ def resources_by_seam(
 
     items = sorted(by_seam.values(), key=lambda x: (x["seam"] or "").lower())
     if not items:
-        return _empty_analytic("No compatible structured evidence available.")
+        return _empty_analytic(NO_COMPATIBLE_STRUCTURED)
 
     msg = None
     if pending:
@@ -176,7 +184,7 @@ def formation_seam_distribution(
     if not use:
         # Still show formations without inventing seam links
         return _empty_analytic(
-            "No compatible structured evidence available."
+            NO_COMPATIBLE_STRUCTURED
             if not linked
             else "Data available but pending human verification.",
             pending=bool(linked) and pending,
@@ -262,14 +270,11 @@ def borehole_depth_summary(
     depth_rows = []
     for row in rows:
         kind = _row_metric_kind(row)
-        if kind != BOREHOLE_DEPTH:
+        if not geo_metrics_compatible(BOREHOLE_DEPTH, kind):
             continue
         if not row.borehole_id:
             continue
         if not (row.depth or row.depth_min):
-            continue
-        # Reject if this looks like seam/formation depth disguised
-        if kind in {SEAM_DEPTH, FORMATION_THICKNESS}:
             continue
         depth_rows.append(row)
 
@@ -277,7 +282,7 @@ def borehole_depth_summary(
     use = official if official else display
     if not use:
         return _empty_analytic(
-            "No compatible structured evidence available.",
+            NO_COMPATIBLE_STRUCTURED,
             pending=False,
         )
 
@@ -320,7 +325,7 @@ def borehole_depth_summary(
         "message": (
             "Data available but pending human verification."
             if pending
-            else (None if items else "No compatible structured evidence available.")
+            else (None if items else NO_COMPATIBLE_STRUCTURED)
         ),
         "pending_verification": pending,
         "official": not pending and bool(items),
@@ -486,14 +491,12 @@ def compare_documents(
     if not doc_a or not doc_b:
         return {"error": "One or both documents were not found.", "items": []}
 
-    wanted = set(m.lower() for m in (metrics or [
-        "formations",
-        "seams",
-        "resources",
-        "boreholes",
-        "borehole_depths",
-        "minimum_workable_thickness",
-    ]))
+    raw_wanted = metrics or list(COMPARE_CATEGORIES)
+    wanted: set[str] = set()
+    for m in raw_wanted:
+        cat = normalize_compare_category(m) or (m.lower().strip() if m else None)
+        if cat:
+            wanted.add(cat)
 
     side_a = _document_compare_side(db, doc_a, wanted)
     side_b = _document_compare_side(db, doc_b, wanted)
@@ -502,12 +505,27 @@ def compare_documents(
     for key in sorted(wanted):
         a_val = side_a.get(key)
         b_val = side_b.get(key)
+        # Mark empty sides with the controlled no-compatible message (not proven absence)
+        a_empty = _side_empty(a_val)
+        b_empty = _side_empty(b_val)
+        if a_empty and isinstance(a_val, dict):
+            a_val = {**a_val, "message": a_val.get("message") or NO_COMPATIBLE_STRUCTURED}
+        if b_empty and isinstance(b_val, dict):
+            b_val = {**b_val, "message": b_val.get("message") or NO_COMPATIBLE_STRUCTURED}
         comparisons.append(
             {
                 "metric": key,
-                "compatible": True,  # each side keeps own metric semantics
-                "document_a": a_val,
-                "document_b": b_val,
+                "compatible": True,  # category itself is comparable; sides may lack evidence
+                "document_a": a_val if not a_empty else {
+                    "count": 0,
+                    "items": [],
+                    "message": NO_COMPATIBLE_STRUCTURED,
+                },
+                "document_b": b_val if not b_empty else {
+                    "count": 0,
+                    "items": [],
+                    "message": NO_COMPATIBLE_STRUCTURED,
+                },
             }
         )
 
@@ -517,6 +535,24 @@ def compare_documents(
         "comparisons": comparisons,
         "note": "Factual comparison only — documents are not ranked.",
     }
+
+
+def _side_empty(side: Any) -> bool:
+    if side is None:
+        return True
+    if not isinstance(side, dict):
+        return False
+    if side.get("count"):
+        return False
+    if side.get("items"):
+        return False
+    if side.get("names"):
+        return False
+    if side.get("ids"):
+        return False
+    if side.get("evidence"):
+        return False
+    return True
 
 
 def _document_compare_side(
@@ -540,9 +576,11 @@ def _document_compare_side(
                     "status": f["review_status"],
                     "document_id": doc.id,
                     "document_name": meta.get("document_name"),
+                    "metric_kind": "formation",
                 }
                 for f in forms
             ],
+            "message": None if forms else NO_COMPATIBLE_STRUCTURED,
         }
 
     if "seams" in wanted:
@@ -559,18 +597,21 @@ def _document_compare_side(
                     "status": s["review_status"],
                     "document_id": doc.id,
                     "document_name": meta.get("document_name"),
+                    "metric_kind": "seam",
                 }
                 for s in seams
             ],
+            "message": None if seams else NO_COMPATIBLE_STRUCTURED,
         }
 
     if "resources" in wanted:
         res = resources_by_seam(db, document_id=doc.id)
+        items = res.get("items") or []
         out["resources"] = {
-            "count": len(res.get("items") or []),
-            "items": res.get("items") or [],
+            "count": len(items),
+            "items": items,
             "pending_verification": res.get("pending_verification"),
-            "message": res.get("message"),
+            "message": res.get("message") or (None if items else NO_COMPATIBLE_STRUCTURED),
         }
 
     if "boreholes" in wanted:
@@ -587,17 +628,20 @@ def _document_compare_side(
                     "status": b["review_status"],
                     "document_id": doc.id,
                     "document_name": meta.get("document_name"),
+                    "metric_kind": "borehole",
                 }
                 for b in bhs
             ],
+            "message": None if bhs else NO_COMPATIBLE_STRUCTURED,
         }
 
     if "borehole_depths" in wanted:
         depths = borehole_depth_summary(db, document_id=doc.id)
+        items = depths.get("items") or []
         out["borehole_depths"] = {
-            "count": len(depths.get("items") or []),
-            "items": depths.get("items") or [],
-            "message": depths.get("message"),
+            "count": len(items),
+            "items": items,
+            "message": depths.get("message") or (None if items else NO_COMPATIBLE_STRUCTURED),
         }
 
     if "minimum_workable_thickness" in wanted:
@@ -605,41 +649,48 @@ def _document_compare_side(
             db,
             document_id=doc.id,
             metric=MINIMUM_WORKABLE_SEAM_THICKNESS,
-            limit=100,
+            limit=200,
         )
         items = []
         for row in rows:
             kind = _row_metric_kind(row)
-            if kind != MINIMUM_WORKABLE_SEAM_THICKNESS:
+            if not geo_metrics_compatible(MINIMUM_WORKABLE_SEAM_THICKNESS, kind):
                 continue
             if row.status == REJECTED_STATUS:
                 continue
-            val = None
-            if row.thickness:
-                val = str(row.thickness)
-            elif row.thickness_min and row.thickness_max:
-                val = f"{row.thickness_min}–{row.thickness_max}"
+            val, unit = workable_thickness_value_from_fact(
+                thickness=row.thickness,
+                thickness_unit=row.thickness_unit,
+                thickness_min=row.thickness_min,
+                thickness_max=row.thickness_max,
+                corrected_value=row.corrected_value,
+                corrected_unit=row.corrected_unit,
+                original_value=row.original_value,
+                original_unit=row.original_unit,
+                evidence_text=row.evidence_text,
+                metric_kind=kind or MINIMUM_WORKABLE_SEAM_THICKNESS,
+            )
             if not val:
                 continue
             items.append(
                 {
                     "value": val,
-                    "unit": row.thickness_unit,
+                    "unit": unit,
                     "page": row.source_page,
                     "status": row.status,
                     "fact_id": row.id,
                     "evidence_text": row.evidence_text,
                     "document_id": doc.id,
                     "document_name": meta.get("document_name"),
-                    "metric_kind": MINIMUM_WORKABLE_SEAM_THICKNESS,
+                    "metric_kind": normalize_geo_metric(kind) or MINIMUM_WORKABLE_SEAM_THICKNESS,
+                    "review_bucket": _status_bucket(row.status),
+                    "requires_human_verification": _status_bucket(row.status) == "review_required",
                 }
             )
         out["minimum_workable_thickness"] = {
             "count": len(items),
             "items": items,
-            "message": None
-            if items
-            else "No compatible structured evidence available.",
+            "message": None if items else NO_COMPATIBLE_STRUCTURED,
         }
 
     out["summary"] = summary

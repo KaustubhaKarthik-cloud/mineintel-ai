@@ -87,12 +87,17 @@ def test_j_listing_rejects_generic_phrases():
         "Seam Barakar",
         "Seam is",
         "Seam of",
+        "Seam s",
+        "Seam Name",
+        "Seam name",
     ]
     for name in bad:
         assert not plausible_seam_name(name), name
+        assert not is_valid_seam_identifier(name), name
     good = ["Seam R4", "Seam IV", "Seam III Top", "Seam III Bottom", "Seam VIA", "Seam II"]
     for name in good:
         assert plausible_seam_name(name), name
+        assert is_valid_seam_identifier(name), name
 
 
 def test_reject_dirt_only_wise_in_page_extraction():

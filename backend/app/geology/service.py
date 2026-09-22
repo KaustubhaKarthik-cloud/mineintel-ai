@@ -8,6 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.geology.classifier import ClassificationResult, classify_document_text
 from app.geology.extractor import GeologicalFactDraft, extract_facts_from_pages
+from app.geology.review import (
+    delete_geological_review_items_for_document,
+    enqueue_geological_review_item,
+)
 from app.geology.taxonomy import DocumentDomain
 from app.models import Document, DocumentPage, GeologicalFact
 
@@ -189,6 +193,7 @@ def extract_and_persist_geological_facts(
     )
 
     if replace_existing:
+        delete_geological_review_items_for_document(db, document.id)
         db.query(GeologicalFact).filter(GeologicalFact.document_id == document.id).delete()
         db.flush()
 
@@ -198,6 +203,9 @@ def extract_and_persist_geological_facts(
         db.add(row)
         rows.append(row)
     db.flush()
+
+    for row in rows:
+        enqueue_geological_review_item(db, row, document=document)
 
     meta = dict(document.meta or {})
     meta["g1_geological_extraction"] = {
@@ -224,6 +232,7 @@ def run_geological_pipeline(db: Session, document: Document) -> dict[str, Any]:
         facts = extract_and_persist_geological_facts(db, document, replace_existing=True)
     else:
         # Clear stale geological facts if document is reclassified away from geology
+        delete_geological_review_items_for_document(db, document.id)
         db.query(GeologicalFact).filter(GeologicalFact.document_id == document.id).delete()
         meta = dict(document.meta or {})
         meta["g1_geological_extraction"] = {

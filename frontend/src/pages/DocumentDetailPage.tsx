@@ -161,8 +161,16 @@ export function DocumentDetailPage() {
         <h2 className="mb-4 font-display text-2xl uppercase tracking-wide text-ore-100">AI extraction</h2>
         {facts.length === 0 ? (
           <div className="panel rounded-lg p-5 text-sm text-ore-400">
-            No structured mining facts yet. Geological exploration reports may still have
-            G1 geological facts and RAG evidence — use the <strong className="text-ore-200">AI Assistant</strong>.
+            No structured mining (ExtractedFact) rows yet. Geological exploration reports may still have
+            G1 geological facts — open{' '}
+            <Link to="/geology" className="text-copper-400 hover:text-copper-300">
+              Geological Explorer
+            </Link>{' '}
+            or{' '}
+            <Link to="/analytics" className="text-copper-400 hover:text-copper-300">
+              Analytics
+            </Link>{' '}
+            (select this document). Zero mining facts does not mean zero geological structured data.
             For production reports: ensure Phase 2 finished, then click{' '}
             <strong className="text-ore-200">Run AI extraction</strong>.
           </div>

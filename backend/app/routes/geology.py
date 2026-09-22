@@ -275,6 +275,18 @@ def compare_documents(
     return result
 
 
+@router.get("/locations")
+def geological_locations(
+    document_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("explore")),
+) -> dict[str, Any]:
+    """Document-grounded map locations — explicit coordinates only, never invented."""
+    from app.geology.coordinates import list_document_locations
+
+    return list_document_locations(db, document_id=document_id)
+
+
 @router.post("/analytics/explain")
 def explain_analytics(
     body: ExplainRequest,

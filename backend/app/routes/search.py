@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.auth.deps import AuthUser, require_permission
 from app.config import get_settings
 from app.database import get_db
 from app.embeddings.provider import EmbeddingError
@@ -17,7 +18,11 @@ router = APIRouter()
 
 
 @router.post("", response_model=SearchResponse)
-def semantic_search(body: SearchRequest, db: Session = Depends(get_db)) -> SearchResponse:
+def semantic_search(
+    body: SearchRequest,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("search")),
+) -> SearchResponse:
     settings = get_settings()
     query = (body.query or "").strip()
     if not query:

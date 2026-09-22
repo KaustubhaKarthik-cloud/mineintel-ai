@@ -17,10 +17,11 @@ import {
   getGeologyCompare,
   getGeologyExplorer,
   getGeologyFact,
+  getGeologyLocations,
 } from '../lib/api'
 import { PageHeader, StatusBadge } from '../components/ui'
 
-type Tab = 'facts' | 'formations' | 'seams' | 'boreholes' | 'analytics' | 'compare'
+type Tab = 'facts' | 'formations' | 'seams' | 'boreholes' | 'analytics' | 'compare' | 'map'
 
 function EmptyState({ message }: { message: string }) {
   return (
@@ -36,6 +37,84 @@ function PendingBanner({ show }: { show?: boolean }) {
     <p className="mb-3 rounded border border-signal-amber/40 bg-signal-amber/10 px-3 py-2 text-xs text-signal-amber">
       Data available but pending human verification. These facts are not silently treated as verified.
     </p>
+  )
+}
+
+function CompareSide({
+  title,
+  side,
+}: {
+  title: string
+  side: Record<string, unknown> | null | undefined
+}) {
+  if (!side) {
+    return (
+      <div>
+        <p className="text-ore-500">{title}</p>
+        <p className="mt-1 text-ore-400">No compatible structured evidence available.</p>
+      </div>
+    )
+  }
+  const count = Number(side.count ?? 0)
+  const message = side.message != null ? String(side.message) : ''
+  const names = Array.isArray(side.names) ? (side.names as string[]) : []
+  const ids = Array.isArray(side.ids) ? (side.ids as string[]) : []
+  const items = Array.isArray(side.items) ? (side.items as Record<string, unknown>[]) : []
+  const evidence = Array.isArray(side.evidence) ? (side.evidence as Record<string, unknown>[]) : []
+  const empty = count === 0 && !names.length && !ids.length && !items.length && !evidence.length
+
+  return (
+    <div>
+      <p className="text-ore-500">{title}</p>
+      {empty ? (
+        <p className="mt-1 text-ore-400">{message || 'No compatible structured evidence available.'}</p>
+      ) : (
+        <ul className="mt-1 max-h-48 space-y-1 overflow-auto">
+          {names.map((n) => (
+            <li key={n} className="rounded bg-ore-900/50 px-2 py-1">
+              {n}
+            </li>
+          ))}
+          {ids.map((id) => (
+            <li key={id} className="rounded bg-ore-900/50 px-2 py-1">
+              {id}
+            </li>
+          ))}
+          {items.map((it, i) => {
+            const page = it.page ?? (Array.isArray(it.pages) ? (it.pages as unknown[]).join(', ') : null)
+            const status = it.status || it.review_bucket
+            return (
+              <li key={String(it.fact_id || i)} className="rounded bg-ore-900/50 px-2 py-1">
+                <span className="text-copper-300">
+                  {String(it.value ?? it.seam ?? it.formation ?? it.borehole_id ?? '—')}
+                </span>
+                {it.unit ? ` ${String(it.unit)}` : ''}
+                {it.seam && it.value ? ` · ${String(it.seam)}` : ''}
+                {page != null ? ` · p.${page}` : ''}
+                {status ? (
+                  <span className="ml-1 text-[10px] uppercase text-ore-500">{String(status)}</span>
+                ) : null}
+                {it.requires_human_verification ? (
+                  <span className="ml-1 text-[10px] text-signal-amber">review</span>
+                ) : null}
+              </li>
+            )
+          })}
+          {evidence.map((ev, i) => (
+            <li key={String(ev.fact_id || i)} className="rounded bg-ore-900/50 px-2 py-1">
+              {String(ev.value ?? '—')}
+              {Array.isArray(ev.pages) && ev.pages.length
+                ? ` · p.${(ev.pages as unknown[]).join(', ')}`
+                : ''}
+              {ev.status ? (
+                <span className="ml-1 text-[10px] uppercase text-ore-500">{String(ev.status)}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      {message && !empty ? <p className="mt-1 text-[11px] text-signal-amber">{message}</p> : null}
+    </div>
   )
 }
 
@@ -67,17 +146,38 @@ function EvidencePanel({
         <div>
           <dt className="text-[11px] uppercase tracking-wide text-ore-500">Entity / metric</dt>
           <dd className="text-ore-100">
-            {[item.seam_label || item.seam || item.formation_name || item.formation || item.borehole_id, item.metric_kind]
+            {[
+              item.display_entity ||
+                item.seam_label ||
+                item.seam ||
+                item.formation_name ||
+                item.formation ||
+                item.borehole_id,
+              item.display_metric ||
+                (item.metric_kind ? String(item.metric_kind).replace(/_/g, ' ') : null),
+            ]
               .filter(Boolean)
-              .join(' · ') || '—'}
+              .join(' · ') || 'Not available'}
           </dd>
+          {item.display_from_evidence ? (
+            <dd className="mt-1 text-[10px] uppercase tracking-wide text-ore-500">
+              Shown from source evidence (not verified structured fields)
+            </dd>
+          ) : null}
         </div>
         <div>
           <dt className="text-[11px] uppercase tracking-wide text-ore-500">Value</dt>
           <dd className="text-copper-300">
-            {String(item.display_value ?? item.value ?? item.original_value ?? '—')}
+            {String(
+              item.display_value ?? item.value ?? item.original_value ?? 'Not available',
+            )}
             {item.display_unit || item.unit ? ` ${item.display_unit || item.unit}` : ''}
           </dd>
+          {item.coordinate_evidence_only ? (
+            <dd className="mt-1 text-[10px] text-signal-amber">
+              Coordinate-looking text is review-required source evidence only — not map-verified.
+            </dd>
+          ) : null}
         </div>
         {item.corrected_value ? (
           <div>
@@ -132,6 +232,16 @@ function EvidencePanel({
                 </a>
               </>
             ) : null}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[11px] uppercase tracking-wide text-ore-500">Location</dt>
+          <dd className="text-ore-200">
+            {String(
+              item.location_display ||
+                (item.provenance as { location_display?: string } | undefined)?.location_display ||
+                '—',
+            )}
           </dd>
         </div>
         <div>
@@ -249,6 +359,7 @@ export function GeologicalExplorerPage() {
   const [compareA, setCompareA] = useState('')
   const [compareB, setCompareB] = useState('')
   const [compare, setCompare] = useState<Awaited<ReturnType<typeof getGeologyCompare>> | null>(null)
+  const [locations, setLocations] = useState<Awaited<ReturnType<typeof getGeologyLocations>> | null>(null)
   const [explainQ, setExplainQ] = useState('Explain the resource distribution shown here.')
   const [explanation, setExplanation] = useState('')
   const [explainLoading, setExplainLoading] = useState(false)
@@ -271,17 +382,33 @@ export function GeologicalExplorerPage() {
       setLoading(true)
       setError('')
       try {
-        const [ex, an] = await Promise.all([
-          getGeologyExplorer(filterParams),
-          getGeologyAnalytics({
-            document_id: documentId || undefined,
-            formation: formation || undefined,
-            seam: seam || undefined,
-          }),
-        ])
-        if (!cancelled) {
-          setExplorer(ex)
-          setAnalytics(an)
+        // Analytics bundle is expensive — only fetch when that tab is active.
+        // Compare uses its own endpoint and does not need the analytics bundle.
+        if (tab === 'analytics') {
+          const [ex, an] = await Promise.all([
+            getGeologyExplorer(filterParams),
+            getGeologyAnalytics({
+              document_id: documentId || undefined,
+              formation: formation || undefined,
+              seam: seam || undefined,
+            }),
+          ])
+          if (!cancelled) {
+            setExplorer(ex)
+            setAnalytics(an)
+          }
+        } else if (tab === 'map') {
+          const [ex, loc] = await Promise.all([
+            getGeologyExplorer(filterParams),
+            getGeologyLocations(documentId || undefined),
+          ])
+          if (!cancelled) {
+            setExplorer(ex)
+            setLocations(loc)
+          }
+        } else {
+          const ex = await getGeologyExplorer(filterParams)
+          if (!cancelled) setExplorer(ex)
         }
       } catch (e) {
         if (!cancelled) {
@@ -295,7 +422,7 @@ export function GeologicalExplorerPage() {
     return () => {
       cancelled = true
     }
-  }, [filterParams, documentId, formation, seam])
+  }, [filterParams, documentId, formation, seam, tab])
 
   async function openFact(factId: string) {
     try {
@@ -338,7 +465,20 @@ export function GeologicalExplorerPage() {
 
   const filters = explorer?.filters
   const summary = explorer?.summary
-  const docs = filters?.documents || []
+  const docs = useMemo(() => {
+    const raw = filters?.documents || []
+    const byId = new Map<string, (typeof raw)[number]>()
+    for (const d of raw) {
+      const id = String(d.document_id || '')
+      if (!id || byId.has(id)) continue
+      byId.set(id, d)
+    }
+    return Array.from(byId.values())
+  }, [filters?.documents])
+
+  function docLabel(d: { document_id?: unknown; document_name?: unknown; display_name?: unknown }) {
+    return String(d.display_name || d.document_name || d.document_id || '')
+  }
 
   return (
     <div>
@@ -359,7 +499,7 @@ export function GeologicalExplorerPage() {
               <option value="">All geological documents</option>
               {docs.map((d) => (
                 <option key={String(d.document_id)} value={String(d.document_id)}>
-                  {String(d.document_name || d.document_id)}
+                  {docLabel(d)}
                 </option>
               ))}
             </select>
@@ -453,7 +593,7 @@ export function GeologicalExplorerPage() {
             ['Review required', summary.review_required_count],
           ].map(([label, value]) => (
             <div key={String(label)} className="panel rounded-lg p-4">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-ore-400">{label}</p>
+              <p className="text-[11px] uppercase tracking-[0.14em] text-ore-400">{String(label)}</p>
               <p className="mt-1 font-display text-2xl text-ore-100">{value != null ? String(value) : '0'}</p>
             </div>
           ))}
@@ -471,6 +611,7 @@ export function GeologicalExplorerPage() {
             ['boreholes', 'Boreholes'],
             ['analytics', 'Analytics'],
             ['compare', 'Compare'],
+            ['map', 'Map'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -507,26 +648,65 @@ export function GeologicalExplorerPage() {
                       <th>Value</th>
                       <th>Page</th>
                       <th>Status</th>
+                      <th>Evidence</th>
                     </tr>
                   </thead>
                   <tbody>
                     {explorer.facts.items.map((f) => (
                       <tr
                         key={String(f.id)}
-                        className="cursor-pointer border-t border-ore-800/80 hover:bg-ore-850/60"
-                        onClick={() => openFact(String(f.id))}
+                        className="border-t border-ore-800/80 hover:bg-ore-850/60"
                       >
                         <td className="py-2 text-ore-100">
-                          {String(f.seam_label || f.formation_name || f.borehole_id || '—')}
+                          {String(
+                            f.display_entity ||
+                              f.seam_label ||
+                              f.formation_name ||
+                              f.borehole_id ||
+                              'Not available',
+                          )}
+                          {f.display_from_evidence ? (
+                            <span className="mt-0.5 block text-[10px] uppercase tracking-wide text-ore-500">
+                              from evidence
+                            </span>
+                          ) : null}
                         </td>
-                        <td className="text-ore-400">{String(f.metric_kind || '—').replace(/_/g, ' ')}</td>
-                        <td className="text-copper-300">
-                          {String(f.display_value ?? '—')}
-                          {f.display_unit ? ` ${f.display_unit}` : ''}
+                        <td className="text-ore-400">
+                          {String(
+                            f.display_metric ||
+                              (f.metric_kind
+                                ? String(f.metric_kind).replace(/_/g, ' ')
+                                : 'Not available'),
+                          )}
                         </td>
-                        <td className="text-ore-400">{f.source_page != null ? String(f.source_page) : '—'}</td>
+                        <td className="max-w-[280px] text-copper-300">
+                          <span className="line-clamp-2">
+                            {String(f.display_value ?? f.evidence_preview ?? 'Not available')}
+                            {f.display_unit ? ` ${f.display_unit}` : ''}
+                          </span>
+                          {f.coordinate_evidence_only ? (
+                            <span className="mt-0.5 block text-[10px] text-signal-amber">
+                              evidence only · not map-verified
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="text-ore-400">
+                          {f.source_page != null ? String(f.source_page) : 'Not available'}
+                        </td>
                         <td>
                           <StatusBadge status={String(f.status || 'extracted')} />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className="text-xs font-medium text-copper-400 hover:text-copper-300"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void openFact(String(f.id))
+                            }}
+                          >
+                            View evidence
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -843,8 +1023,8 @@ export function GeologicalExplorerPage() {
                   >
                     <option value="">Select…</option>
                     {docs.map((d) => (
-                      <option key={String(d.document_id)} value={String(d.document_id)}>
-                        {String(d.document_name || d.document_id)}
+                      <option key={`a-${String(d.document_id)}`} value={String(d.document_id)}>
+                        {docLabel(d)}
                       </option>
                     ))}
                   </select>
@@ -858,8 +1038,8 @@ export function GeologicalExplorerPage() {
                   >
                     <option value="">Select…</option>
                     {docs.map((d) => (
-                      <option key={String(d.document_id)} value={String(d.document_id)}>
-                        {String(d.document_name || d.document_id)}
+                      <option key={`b-${String(d.document_id)}`} value={String(d.document_id)}>
+                        {docLabel(d)}
                       </option>
                     ))}
                   </select>
@@ -883,23 +1063,81 @@ export function GeologicalExplorerPage() {
                         {String(c.metric).replace(/_/g, ' ')}
                       </p>
                       <div className="mt-2 grid gap-3 md:grid-cols-2 text-xs text-ore-300">
-                        <div>
-                          <p className="text-ore-500">{String(compare.document_a.document_name)}</p>
-                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap">
-                            {JSON.stringify(c.document_a, null, 2)}
-                          </pre>
-                        </div>
-                        <div>
-                          <p className="text-ore-500">{String(compare.document_b.document_name)}</p>
-                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap">
-                            {JSON.stringify(c.document_b, null, 2)}
-                          </pre>
-                        </div>
+                        <CompareSide
+                          title={String(compare.document_a.document_name || 'Document A')}
+                          side={c.document_a as Record<string, unknown> | null | undefined}
+                        />
+                        <CompareSide
+                          title={String(compare.document_b.document_name || 'Document B')}
+                          side={c.document_b as Record<string, unknown> | null | undefined}
+                        />
                       </div>
                     </div>
                   ))}
                 </div>
               ) : null}
+            </section>
+          ) : null}
+
+          {tab === 'map' ? (
+            <section className="panel rounded-lg p-4">
+              <h2 className="font-display text-xl uppercase tracking-wide text-ore-100">
+                Geological map
+              </h2>
+              <p className="mt-1 text-xs text-ore-500">
+                Markers only from explicit latitude/longitude in verified document evidence — never
+                guessed, geocoded, or defaulted.
+              </p>
+              {!locations ? (
+                <p className="mt-3 text-sm text-ore-400">Loading locations…</p>
+              ) : !locations.available || !(locations.items || []).length ? (
+                <EmptyState
+                  message={
+                    locations.message ||
+                    'Location unavailable from verified document data.'
+                  }
+                />
+              ) : (
+                <div className="mt-3 space-y-4">
+                  {(locations.items || []).map((loc) => {
+                    const lat = Number(loc.latitude)
+                    const lon = Number(loc.longitude)
+                    const delta = 0.08
+                    const bbox = `${lon - delta}%2C${lat - delta}%2C${lon + delta}%2C${lat + delta}`
+                    const marker = `${lat}%2C${lon}`
+                    const embed = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`
+                    return (
+                      <div key={loc.document_id} className="rounded border border-ore-800 bg-ore-900/40 p-3">
+                        <p className="text-sm text-ore-100">{loc.document_name || loc.document_id}</p>
+                        <p className="mt-1 text-xs text-ore-400">
+                          {lat.toFixed(5)}, {lon.toFixed(5)}
+                          {loc.page != null ? ` · p.${loc.page}` : ''}
+                          {loc.location_source ? ` · source: ${loc.location_source}` : ''}
+                          {loc.status ? ` · ${loc.status}` : ''}
+                        </p>
+                        {loc.evidence_text ? (
+                          <p className="mt-1 text-xs text-ore-500 line-clamp-2">{loc.evidence_text}</p>
+                        ) : null}
+                        <iframe
+                          title={`map-${loc.document_id}`}
+                          className="mt-3 h-56 w-full rounded border border-ore-800"
+                          src={embed}
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                        <a
+                          className="mt-2 inline-block text-xs text-copper-400 hover:text-copper-300"
+                          href={`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=12/${lat}/${lon}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open in OpenStreetMap
+                        </a>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </section>
           ) : null}
         </div>

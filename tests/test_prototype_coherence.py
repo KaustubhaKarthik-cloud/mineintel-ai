@@ -96,7 +96,7 @@ def test_analytics_document_filter(client, digital_pdf, tmp_path, db_session):
     assert r2.json()["insufficient"] is True
 
 
-def test_reports_generate_view_download(client, digital_pdf, tmp_path, db_session):
+def test_reports_generate_view_download(client, digital_pdf, tmp_path, db_session, admin_headers):
     path = tmp_path / "R.pdf"
     shutil.copy(digital_pdf, path)
     doc_id = _upload(client, path).json()["id"]
@@ -139,7 +139,7 @@ def test_reports_generate_view_download(client, digital_pdf, tmp_path, db_sessio
     assert dl.status_code == 200
     assert "attachment" in dl.headers.get("content-disposition", "").lower()
 
-    deleted = client.delete(f"/api/reports/{report_id}")
+    deleted = client.delete(f"/api/reports/{report_id}", headers=admin_headers)
     assert deleted.status_code == 200
     assert client.get("/api/reports").json()["total"] == 0
 

@@ -12,6 +12,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.geology.entities import is_plausible_formation_name, normalize_formation_name
+from app.geology.location_labels import annotate_evidence_display, format_location_display
 from app.geology.metric_kinds import (
     BOREHOLE,
     BOREHOLE_DEPTH,
@@ -177,12 +178,14 @@ def _apply_status_filter(q, status: Optional[str]):
 
 
 def _row_metric_kind(row: GeologicalFact) -> Optional[str]:
+    from app.geology.semantic import normalize_geo_metric
+
     stored = (getattr(row, "metric_kind", None) or "").strip().lower() or None
     if stored:
-        return stored
+        return normalize_geo_metric(stored) or stored
     has_thickness = bool(row.thickness or getattr(row, "thickness_min", None))
     has_depth = bool(row.depth or getattr(row, "depth_min", None))
-    return classify_evidence_metric_kind(
+    inferred = classify_evidence_metric_kind(
         text=row.evidence_text,
         seam_name=row.seam_name,
         borehole_id=row.borehole_id,
@@ -190,6 +193,7 @@ def _row_metric_kind(row: GeologicalFact) -> Optional[str]:
         has_thickness=has_thickness,
         has_depth=has_depth,
     )
+    return normalize_geo_metric(inferred) or inferred
 
 
 def _formation_ok(name: Optional[str], evidence: Optional[str] = None) -> Optional[str]:
@@ -258,13 +262,10 @@ def query_geological_facts(
         q = q.filter(GeologicalFact.borehole_id.ilike(f"%{borehole}%"))
     rows = q.order_by(GeologicalFact.source_page, GeologicalFact.created_at).limit(8000).all()
 
-    metric_key = (metric or "").strip().lower() or None
+    from app.geology.semantic import normalize_geo_metric
+
+    metric_key = normalize_geo_metric(metric) or ((metric or "").strip().lower() or None)
     if metric_key:
-        # Normalize aliases
-        if metric_key == "resource":
-            metric_key = RESOURCE_QUANTITY
-        elif metric_key == "reserve":
-            metric_key = RESERVE_QUANTITY
         filtered: list[GeologicalFact] = []
         for row in rows:
             kind = _row_metric_kind(row)
@@ -331,6 +332,122 @@ def query_geological_facts(
     return rows[offset : offset + limit]
 
 
+def _truncate_evidence(text: str, *, max_len: int = 160) -> str:
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[: max_len - 1].rstrip() + "…"
+
+
+def _evidence_heading_lines(evidence: Optional[str]) -> list[str]:
+    """Split evidence into short heading-like lines for display only."""
+    if not evidence:
+        return []
+    raw_lines = re.split(r"[\r\n]+|(?<=[.!?])\s+(?=[A-Z])", evidence.strip())
+    lines: list[str] = []
+    for line in raw_lines:
+        s = re.sub(r"\s+", " ", line).strip(" ·\t-–—")
+        if not s:
+            continue
+        # Skip very long body sentences as headings
+        if len(s) > 80:
+            continue
+        lines.append(s)
+        if len(lines) >= 6:
+            break
+    return lines
+
+
+def _display_fields_from_evidence(evidence: Optional[str]) -> dict[str, Any]:
+    """Presentation-only fallbacks from evidence_text. Never invents verified facts."""
+    text = (evidence or "").strip()
+    if not text:
+        return {
+            "display_entity": None,
+            "display_metric": None,
+            "display_value": None,
+            "display_from_evidence": False,
+            "evidence_preview": None,
+        }
+
+    annotated = annotate_evidence_display(text) or text
+    preview = _truncate_evidence(annotated)
+    lines = _evidence_heading_lines(annotated)
+
+    entity = None
+    metric = None
+    value = None
+
+    # Prefer recognizable location / coordinate section labels when present
+    joined = " ".join(lines) if lines else annotated
+    loc_m = re.search(
+        r"(?i)\b(location\s*(?:&|and)?\s*accessibility|location|accessibility)\b",
+        joined,
+    )
+    coord_m = re.search(
+        r"(?i)\b(cardinal\s+point\s+coordinates|coordinates?|latitude|longitude)\b",
+        joined,
+    )
+    if loc_m:
+        # Use the matching phrase as entity when it looks like a section title
+        for line in lines:
+            if re.search(r"(?i)location|accessibility", line) and len(line) <= 60:
+                entity = line
+                break
+        if not entity:
+            entity = "Location & Accessibility"
+    if coord_m:
+        for line in lines:
+            if re.search(r"(?i)cardinal|coordinate|latitude|longitude", line) and len(line) <= 60:
+                metric = line
+                break
+        if not metric:
+            metric = "Cardinal Point Coordinates"
+
+    # Pull latitude/longitude snippets for value display only (not map-verified)
+    lat = re.search(
+        r"(?i)\blatitude\s*[=:]?\s*[+-]?\d{1,2}(?:\.\d+)?\s*°?\s*[nNsS]?",
+        annotated,
+    )
+    lon = re.search(
+        r"(?i)\blongitude\s*[=:]?\s*[+-]?\d{1,3}(?:\.\d+)?\s*°?\s*[eEwW]?",
+        annotated,
+    )
+    if lat or lon:
+        parts = []
+        if lat:
+            parts.append(lat.group(0).strip())
+        if lon:
+            parts.append(lon.group(0).strip())
+        value = "; ".join(parts)
+
+    # Generic heading fallbacks when no location/coord labels
+    if not entity and lines:
+        entity = lines[0]
+    if not metric and len(lines) >= 2:
+        metric = lines[1]
+    if not value and len(lines) >= 3:
+        value = lines[2]
+    if not value:
+        value = preview
+
+    # Safe labels when we only have raw evidence
+    if not entity:
+        entity = "Detected evidence"
+    if not metric:
+        metric = "Source evidence"
+
+    return {
+        "display_entity": entity,
+        "display_metric": metric,
+        "display_value": value,
+        "display_from_evidence": True,
+        "evidence_preview": preview,
+        # Coordinate-looking text shown as evidence only — map pipeline untouched
+        "coordinate_evidence_only": bool(lat or lon),
+    }
+
+
 def fact_to_explorer_item(
     row: GeologicalFact,
     doc: Optional[Document] = None,
@@ -367,6 +484,40 @@ def fact_to_explorer_item(
         display_value = seam
     elif row.borehole_id:
         display_value = row.borehole_id
+    elif row.lithology:
+        display_value = row.lithology
+    elif row.coal_quality_value:
+        display_value = str(row.coal_quality_value)
+        display_unit = row.coal_quality_unit
+
+    # Structured entity / metric when available
+    display_entity = seam or formation or row.borehole_id or None
+    display_metric = kind.replace("_", " ") if kind else None
+    if row.coal_quality_parameter and not display_metric:
+        display_metric = row.coal_quality_parameter
+
+    evidence_fields = _display_fields_from_evidence(row.evidence_text)
+    display_from_evidence = False
+    if not display_entity:
+        if evidence_fields.get("display_entity"):
+            display_entity = evidence_fields["display_entity"]
+            display_from_evidence = True
+        else:
+            display_entity = "Not available"
+    if not display_metric:
+        if evidence_fields.get("display_metric"):
+            display_metric = evidence_fields["display_metric"]
+            display_from_evidence = True
+        else:
+            display_metric = "Not available"
+    if not display_value:
+        if evidence_fields.get("display_value"):
+            display_value = evidence_fields["display_value"]
+            display_from_evidence = True
+        else:
+            display_value = "Not available"
+
+    evidence_text = annotate_evidence_display(row.evidence_text) or row.evidence_text
 
     return {
         **base,
@@ -375,17 +526,27 @@ def fact_to_explorer_item(
         "document_type": meta["document_type"],
         "metric_kind": kind,
         "formation_name": formation,
+        "seam_name": seam,  # presentation: suppress OCR/header noise
         "seam_label": seam,
+        "display_entity": display_entity,
+        "display_metric": display_metric,
         "display_value": display_value,
         "display_unit": display_unit,
+        "display_from_evidence": bool(display_from_evidence),
+        "evidence_preview": evidence_fields.get("evidence_preview")
+        or (_truncate_evidence(evidence_text) if evidence_text else None),
+        "coordinate_evidence_only": bool(evidence_fields.get("coordinate_evidence_only")),
         "review_bucket": bucket,
         "requires_human_verification": bucket == "review_required",
+        "location_display": format_location_display(row.evidence_text),
+        "evidence_text": evidence_text,
         "provenance": {
             "document_id": row.document_id,
             "document_name": meta["document_name"],
             "page": row.source_page,
             "source_location": row.source_location,
-            "evidence_text": row.evidence_text,
+            "evidence_text": evidence_text,
+            "location_display": format_location_display(row.evidence_text),
             "status": row.status,
             "confidence": row.extraction_confidence,
         },
@@ -393,21 +554,44 @@ def fact_to_explorer_item(
 
 
 def list_geological_documents(db: Session) -> list[dict[str, Any]]:
-    """Documents that have at least one non-rejected geological fact."""
+    """Documents that have at least one non-rejected geological fact.
+
+    Identity is document_id only (never filename). Same filename with different
+    IDs remain separate; duplicate IDs collapse to one entry. display_name
+    disambiguates colliding filenames.
+    """
+    from collections import Counter
+
     rows = (
         db.query(GeologicalFact.document_id)
         .filter(GeologicalFact.status != REJECTED_STATUS)
         .distinct()
         .all()
     )
-    ids = [r[0] for r in rows if r[0]]
+    # Preserve first-seen order while hard-deduping by document_id
+    seen: set[str] = set()
+    ids: list[str] = []
+    for r in rows:
+        did = r[0]
+        if not did or did in seen:
+            continue
+        seen.add(did)
+        ids.append(did)
     docs = _doc_map(db, set(ids))
     items = []
     for did in ids:
         doc = docs.get(did)
         summary = document_summary(db, did)
         items.append({**_doc_meta(doc), **summary})
-    items.sort(key=lambda x: (x.get("document_name") or "").lower())
+    name_counts = Counter((i.get("document_name") or "").lower() for i in items)
+    for i in items:
+        name = i.get("document_name") or i.get("document_id") or ""
+        if name_counts.get(name.lower(), 0) > 1:
+            short = (i.get("document_id") or "")[:8]
+            i["display_name"] = f"{name} [{short}]"
+        else:
+            i["display_name"] = name
+    items.sort(key=lambda x: ((x.get("document_name") or "").lower(), x.get("document_id") or ""))
     return items
 
 

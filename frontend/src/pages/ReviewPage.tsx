@@ -83,6 +83,11 @@ export function ReviewPage() {
                     : item.page_number != null
                       ? ` · Page: ${item.page_number}`
                       : ''}
+                  {item.geological_fact_id
+                    ? ` · Fact: ${item.geological_fact_id.slice(0, 8)}…`
+                    : item.extracted_fact_id
+                      ? ` · Fact: ${item.extracted_fact_id.slice(0, 8)}…`
+                      : ''}
                 </p>
               </div>
               <ConfidenceBar value={item.confidence} />

@@ -1,4 +1,8 @@
-"""Digital PDF text extraction and scanned-PDF OCR via PyMuPDF."""
+"""Digital PDF text extraction and scanned-PDF OCR via PyMuPDF.
+
+Native/text PDFs use embedded text only (no OCR).
+Scanned/image PDFs use the configurable OCR strategy (Paddle primary, Tesseract fallback).
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,8 @@ from typing import Optional
 import fitz  # PyMuPDF
 
 from app.config import get_settings
-from app.document_processing.ocr_processor import OCRUnavailableError, ocr_pil_image_detailed
+from app.document_processing.ocr.strategy import ocr_pil_image_detailed, resolved_engine
+from app.document_processing.ocr_processor import OCRUnavailableError
 from app.document_processing.ocr_refine import looks_like_numeric_table, merge_ocr_decimals
 from app.document_processing.types import ExtractedPage, ProcessingResult
 from app.models import SourceType
@@ -47,6 +52,25 @@ def _render_page_image(page: fitz.Page, dpi: int):
     return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
 
 
+def _content_meta_from_ocr(base, *, base_dpi: int, refined: bool, hi_dpi: int, detail_mean) -> dict:
+    meta = {
+        "ocr_dpi": base_dpi,
+        "ocr_engine": getattr(base, "engine", None) or resolved_engine(),
+        "ocr_refined": refined,
+        "ocr_detail_dpi": hi_dpi if refined else None,
+        "ocr_mean_confidence": base.mean_confidence,
+        "ocr_detail_mean_confidence": detail_mean,
+        "ocr_word_count": base.word_count,
+        "ocr_low_confidence_decimals": base.low_confidence_decimals,
+        "ocr_low_confidence_words": base.low_confidence_words[:20],
+    }
+    boxes = getattr(base, "boxes", None) or []
+    if boxes:
+        # Cap stored boxes for DB size while keeping page-level evidence
+        meta["ocr_boxes"] = boxes[:200]
+    return meta
+
+
 def ocr_pdf_pages(
     path: Path,
     dpi: Optional[int] = None,
@@ -69,34 +93,50 @@ def ocr_pdf_pages(
     pages: list[ExtractedPage] = []
     try:
         for i, page in enumerate(doc):
+            page_number = i + 1
             image = _render_page_image(page, base_dpi)
-            base = ocr_pil_image_detailed(image)
+            base = ocr_pil_image_detailed(image, page_number=page_number)
             text = base.text
             refined = False
             detail_mean = None
             if do_refine and hi_dpi > base_dpi and looks_like_numeric_table(text):
-                detail = ocr_pil_image_detailed(_render_page_image(page, hi_dpi))
+                detail = ocr_pil_image_detailed(
+                    _render_page_image(page, hi_dpi), page_number=page_number
+                )
                 detail_mean = detail.mean_confidence
                 merged = merge_ocr_decimals(text, detail.text)
                 if merged != text:
                     text = merged
                     refined = True
+
+            content_meta = _content_meta_from_ocr(
+                base,
+                base_dpi=base_dpi,
+                refined=refined,
+                hi_dpi=hi_dpi,
+                detail_mean=detail_mean,
+            )
+            # Optional assistive table hints (never replaces structured_table)
+            try:
+                from app.document_processing.ocr.table_assist import extract_table_hints_from_image
+
+                hints = extract_table_hints_from_image(
+                    image,
+                    page_number=page_number,
+                    source_document=path.name,
+                )
+                if hints:
+                    content_meta["ocr_table_assist"] = hints
+            except Exception:  # noqa: BLE001
+                pass
+
             pages.append(
                 ExtractedPage(
-                    page_number=i + 1,
+                    page_number=page_number,
                     text=text,
                     source_type=SourceType.OCR_PAGE.value,
-                    source_location=f"page:{i + 1}:ocr",
-                    content_meta={
-                        "ocr_dpi": base_dpi,
-                        "ocr_refined": refined,
-                        "ocr_detail_dpi": hi_dpi if refined else None,
-                        "ocr_mean_confidence": base.mean_confidence,
-                        "ocr_detail_mean_confidence": detail_mean,
-                        "ocr_word_count": base.word_count,
-                        "ocr_low_confidence_decimals": base.low_confidence_decimals,
-                        "ocr_low_confidence_words": base.low_confidence_words[:20],
-                    },
+                    source_location=f"page:{page_number}:ocr",
+                    content_meta=content_meta,
                 )
             )
     finally:
@@ -126,12 +166,26 @@ def process_pdf(path: Path) -> ProcessingResult:
     except OCRUnavailableError:
         raise
 
+    engines_used = sorted(
+        {
+            (p.content_meta or {}).get("ocr_engine")
+            for p in ocr_pages
+            if (p.content_meta or {}).get("ocr_engine")
+        }
+    )
     return ProcessingResult(
         pages=ocr_pages,
         is_scanned=True,
         ocr_used=True,
         file_type="pdf",
         page_count=len(ocr_pages),
-        meta={"text_density": density, "mode": "scanned_ocr", "ocr_dpi": settings.ocr_dpi},
+        meta={
+            "text_density": density,
+            "mode": "scanned_ocr",
+            "ocr_dpi": settings.ocr_dpi,
+            "ocr_engine_primary": settings.ocr_engine,
+            "ocr_fallback": settings.ocr_fallback,
+            "ocr_engines_used": engines_used,
+        },
         stage="completed",
     )

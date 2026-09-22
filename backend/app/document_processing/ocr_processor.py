@@ -29,6 +29,10 @@ class OCRResult:
     word_count: int = 0
     low_confidence_words: list[str] = field(default_factory=list)
     low_confidence_decimals: list[str] = field(default_factory=list)
+    # Optional provenance for SIH evidence (Paddle fills boxes; Tesseract leaves empty)
+    boxes: list = field(default_factory=list)
+    engine: str = "tesseract"
+    page: Optional[int] = None
 
 
 def _resolve_tesseract_cmd() -> Optional[str]:

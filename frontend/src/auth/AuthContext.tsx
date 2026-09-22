@@ -29,7 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    // Always resolve current user (anonymous demo analyst when no token)
+    // Resolve current user (anonymous least-privilege USER when auth is optional)
     void refresh()
   }, [refresh])
 
@@ -53,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
       hasPermission: (perm: string) => perms.has(perm),
-      isAdmin: user?.role === 'admin',
+      isAdmin: user?.role === 'admin' || Boolean(user?.permissions?.includes('users.manage')),
     }
   }, [user, loading, login, logout, refresh])
 

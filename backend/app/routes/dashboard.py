@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from app.auth.deps import AuthUser, require_permission
 from app.database import get_db
 from app.models import Document, DocumentStatus, Topic
 from app.schemas import DashboardStats, DocumentOut
@@ -11,8 +12,11 @@ router = APIRouter()
 
 
 @router.get("", response_model=DashboardStats)
-def get_dashboard(db: Session = Depends(get_db)) -> DashboardStats:
-    """Blend live document counts with Phase 1 demo intelligence stats."""
+def get_dashboard(
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("documents.read")),
+) -> DashboardStats:
+    """Live document counts; demo intelligence stats only fill gaps when DB is empty."""
     base = demo_data.get_dashboard_stats()
     docs = db.query(Document).order_by(desc(Document.created_at)).all()
     topic_count = db.query(Topic).count()

@@ -150,11 +150,21 @@ def test_rbac_admin_can_manage_users(phase7_client):
     created = client.post(
         "/api/users",
         headers=_auth("admin", ids),
-        json={"username": "newbie", "password": "newbie12", "role": "analyst"},
+        json={"username": "newbie", "password": "newbie12", "role": "user"},
     )
     assert created.status_code == 200
     assert created.json()["username"] == "newbie"
+    assert created.json()["role"] == "user"
     assert "password" not in created.json()
+
+    # Legacy role strings are accepted and normalized
+    legacy = client.post(
+        "/api/users",
+        headers=_auth("admin", ids),
+        json={"username": "legacy_a", "password": "legacy12", "role": "analyst"},
+    )
+    assert legacy.status_code == 200
+    assert legacy.json()["role"] == "user"
 
 
 def test_analyst_cannot_read_audit(phase7_client):
@@ -177,6 +187,7 @@ def test_admin_can_read_audit(phase7_client):
 def test_report_generate_view_download(phase7_client, tmp_path):
     client, Session, ids = phase7_client
     # Empty DB → report still generates with insufficient sections
+    # USER (legacy analyst) may generate; ADMIN (legacy reviewer) may also generate.
     gen = client.post(
         "/api/reports/generate",
         headers=_auth("analyst", ids),
@@ -200,13 +211,17 @@ def test_report_generate_view_download(phase7_client, tmp_path):
     assert dl.status_code == 200
     assert "attachment" in dl.headers.get("content-disposition", "")
 
-    # Reviewer can read but not generate
-    denied = client.post(
+    # USER cannot access admin-only validation
+    denied_val = client.get("/api/validation/conflicts", headers=_auth("analyst", ids))
+    assert denied_val.status_code == 403
+
+    # Legacy reviewer maps to ADMIN — can generate and validate
+    ok_gen = client.post(
         "/api/reports/generate",
         headers=_auth("reviewer", ids),
-        json={"title": "Nope"},
+        json={"title": "Admin report"},
     )
-    assert denied.status_code == 403
+    assert ok_gen.status_code == 200
 
 
 def test_correction_history_preserved(phase7_client):
@@ -344,3 +359,46 @@ def test_system_status_shows_ai_message_when_local_down(phase7_client, monkeypat
     if ai["connection_health"] == "unavailable":
         assert ai.get("message")
         assert "Ollama" in ai["message"] or "unavailable" in ai["message"].lower()
+
+
+def test_user_cannot_access_validation_or_reviews(phase7_client):
+    client, _, ids = phase7_client
+    for path in (
+        "/api/validation/conflicts",
+        "/api/validation/stats",
+        "/api/reviews",
+    ):
+        r = client.get(path, headers=_auth("analyst", ids))
+        assert r.status_code == 403, path
+
+
+def test_admin_can_access_validation_and_reviews(phase7_client):
+    client, _, ids = phase7_client
+    for path in (
+        "/api/validation/conflicts",
+        "/api/validation/stats",
+        "/api/reviews",
+    ):
+        r = client.get(path, headers=_auth("admin", ids))
+        assert r.status_code == 200, path
+    # Legacy reviewer → admin permissions
+    r = client.get("/api/reviews", headers=_auth("reviewer", ids))
+    assert r.status_code == 200
+
+
+def test_normalize_role_mapping():
+    from app.auth.deps import has_permission, normalize_role
+    from app.models import UserRole
+
+    assert normalize_role("analyst") == UserRole.USER.value
+    assert normalize_role("reviewer") == UserRole.ADMIN.value
+    assert normalize_role("admin") == UserRole.ADMIN.value
+    assert normalize_role("user") == UserRole.USER.value
+    assert has_permission("user", "analytics")
+    assert not has_permission("user", "review.act")
+    assert not has_permission("user", "validation.act")
+    assert has_permission("admin", "review.act")
+    assert has_permission("admin", "validation.act")
+    assert has_permission("analyst", "analytics")
+    assert not has_permission("analyst", "review.act")
+    assert has_permission("reviewer", "review.act")

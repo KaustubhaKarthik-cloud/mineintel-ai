@@ -50,6 +50,14 @@ class Settings(BaseSettings):
 
     tesseract_cmd: str = ""
     ocr_language: str = "eng"
+    # OCR engine selection (scanned PDFs / images only — native PDFs never OCR'd)
+    # OCR_ENGINE=paddle|tesseract|auto   OCR_FALLBACK=tesseract|none|paddle
+    ocr_engine: str = "paddle"
+    ocr_fallback: str = "tesseract"
+    ocr_min_usable_chars: int = 8
+    paddle_ocr_lang: str = "en"
+    # Table path: existing = PyMuPDF structured_table (default); paddle = optional assist only
+    ocr_table_engine: str = "existing"
     # Min average chars/page to treat PDF as digital (else OCR)
     pdf_digital_text_threshold: int = 40
     # Base render DPI for scanned PDFs (stable layout); detail pass corrects digit confusions
@@ -91,8 +99,8 @@ class Settings(BaseSettings):
     topic_summary_top_k: int = 6
 
     demo_mode: bool = True
-    # Phase 7 — auth / RBAC
-    auth_required: bool = False  # False = demo can browse; protected write routes still check permissions when token present
+    # Phase 7 — auth / RBAC (hackathon: require login; anonymous = least-privilege user if disabled)
+    auth_required: bool = True
     jwt_expire_hours: int = 24
     auth_seed_users: bool = True
 

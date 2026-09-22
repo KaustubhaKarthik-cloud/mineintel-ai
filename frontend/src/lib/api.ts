@@ -223,11 +223,27 @@ export async function getAnalytics(): Promise<AnalyticsData> {
 }
 
 export type AnalyticsDimensions = {
+  domain?: string | null
   entities: string[]
+  commodities?: string[]
+  commodity_labels?: Record<string, string>
   metrics: string[]
+  semantic_metrics?: string[]
+  metric_labels?: Record<string, string>
   periods: string[]
   reporting_months?: string[]
   measurement_types?: string[]
+  measure_labels?: Record<string, string>
+  seams?: string[]
+  formations?: string[]
+  boreholes?: string[]
+  statuses?: string[]
+  fact_count?: number
+  message?: string | null
+  suggested_entity?: string | null
+  suggested_metric?: string | null
+  suggested_commodity?: string | null
+  suggested_reporting_month?: string | null
   documents?: Array<{
     id: string
     name: string
@@ -235,17 +251,28 @@ export type AnalyticsDimensions = {
     status?: string
     page_count?: number
     structured_fact_count?: number
+    production_fact_count?: number
+    geological_fact_count?: number
+    domain?: string | null
     has_structured_data?: boolean
   }>
 }
 
-export async function getAnalyticsDimensions(documentIds?: string[]) {
+export async function getAnalyticsDimensions(
+  documentIds?: string[],
+  filters?: { entity?: string; commodity?: string; metric?: string; domain?: string },
+) {
   const q = new URLSearchParams()
   for (const id of documentIds || []) q.append('document_id', id)
+  if (filters?.entity) q.set('entity', filters.entity)
+  if (filters?.commodity) q.set('commodity', filters.commodity)
+  if (filters?.metric) q.set('metric', filters.metric)
+  if (filters?.domain) q.set('domain', filters.domain)
   const suffix = q.toString() ? `?${q}` : ''
   return (
     (await fetchJson<AnalyticsDimensions>(`/analytics/dimensions${suffix}`)) ?? {
       entities: [],
+      commodities: [],
       metrics: [],
       periods: [],
       reporting_months: [],
@@ -255,9 +282,72 @@ export async function getAnalyticsDimensions(documentIds?: string[]) {
   )
 }
 
+export async function getAnalyticsData(params: {
+  entity?: string
+  commodity?: string
+  metric?: string
+  measure?: string
+  period?: string
+  periods?: string[]
+  documentIds?: string[]
+  reporting_month?: string
+  compare?: string
+  domain?: string
+  seam?: string
+  formation?: string
+}) {
+  const q = new URLSearchParams()
+  if (params.entity) q.set('entity', params.entity)
+  if (params.commodity) q.set('commodity', params.commodity)
+  if (params.metric) q.set('metric', params.metric)
+  if (params.measure) q.set('measure', params.measure)
+  if (params.period) q.set('period', params.period)
+  for (const p of params.periods || []) q.append('periods', p)
+  for (const id of params.documentIds || []) q.append('document_id', id)
+  if (params.reporting_month) q.set('reporting_month', params.reporting_month)
+  if (params.compare) q.set('compare', params.compare)
+  if (params.domain) q.set('domain', params.domain)
+  if (params.seam) q.set('seam', params.seam)
+  if (params.formation) q.set('formation', params.formation)
+  return fetchJsonOrThrow<{
+    domain?: string | null
+    entity?: string | null
+    commodity?: string | null
+    commodity_label?: string | null
+    metric?: string | null
+    measure?: string | null
+    unit?: string | null
+    trend: import('../types').AnalyticsTrendResponse
+    actual_vs_target?: import('../types').ActualVsTargetResponse | null
+    table: Array<{
+      period: string
+      actual?: number | string | null
+      target?: number | null
+      unit?: string | null
+      source?: string | null
+      page?: number | null
+      document_id?: string | null
+      fact_id?: string | null
+      evidence_available?: boolean
+      evidence_note?: string
+      achievement_percentage?: number | null
+      status?: string | null
+      review_bucket?: string | null
+      seam?: string | null
+      formation?: string | null
+    }>
+    provenance: import('../types').AnalyticsProvenance[]
+    insufficient?: boolean
+    message?: string | null
+    counts?: { total?: number; verified?: number; review_required?: number }
+    llm_context?: Record<string, unknown>
+  }>(`/analytics/data?${q}`)
+}
+
 export async function getAnalyticsTrend(params: {
   entity?: string
   metric: string
+  commodity?: string
   period?: string[]
   documentIds?: string[]
   reporting_month?: string
@@ -266,6 +356,7 @@ export async function getAnalyticsTrend(params: {
   const q = new URLSearchParams()
   q.set('metric', params.metric)
   if (params.entity) q.set('entity', params.entity)
+  if (params.commodity) q.set('commodity', params.commodity)
   for (const p of params.period || []) q.append('period', p)
   for (const id of params.documentIds || []) q.append('document_id', id)
   if (params.reporting_month) q.set('reporting_month', params.reporting_month)
@@ -278,6 +369,7 @@ export async function getActualVsTarget(params: {
   period?: string
   actual_metric?: string
   target_metric?: string
+  commodity?: string
   documentIds?: string[]
   reporting_month?: string
 }) {
@@ -286,6 +378,7 @@ export async function getActualVsTarget(params: {
   if (params.period) q.set('period', params.period)
   if (params.actual_metric) q.set('actual_metric', params.actual_metric)
   if (params.target_metric) q.set('target_metric', params.target_metric)
+  if (params.commodity) q.set('commodity', params.commodity)
   for (const id of params.documentIds || []) q.append('document_id', id)
   if (params.reporting_month) q.set('reporting_month', params.reporting_month)
   return fetchJsonOrThrow<import('../types').ActualVsTargetResponse>(
@@ -296,6 +389,7 @@ export async function getActualVsTarget(params: {
 export async function getEntityCompare(params: {
   entities: string[]
   metric: string
+  commodity?: string
   period?: string
   documentIds?: string[]
   reporting_month?: string
@@ -305,6 +399,7 @@ export async function getEntityCompare(params: {
   q.set('metric', params.metric)
   for (const e of params.entities) q.append('entities', e)
   if (params.period) q.set('period', params.period)
+  if (params.commodity) q.set('commodity', params.commodity)
   for (const id of params.documentIds || []) q.append('document_id', id)
   if (params.reporting_month) q.set('reporting_month', params.reporting_month)
   if (params.measurement_type) q.set('measurement_type', params.measurement_type)
@@ -322,6 +417,7 @@ export async function chatAssistant(
   query_type?: string | null
   domain?: string | null
   geological_intent?: string | null
+  is_geological?: boolean
   structured_evidence?: Array<Record<string, unknown>>
   rag_evidence?: Array<Record<string, unknown>>
   conflicts?: Array<Record<string, unknown>>
@@ -757,6 +853,27 @@ export async function getGeologyExplorer(params: Record<string, string | undefin
 
 export async function getGeologyFact(factId: string) {
   return fetchJsonOrThrow<Record<string, unknown>>(`/geology/facts/${factId}`)
+}
+
+export async function getGeologyLocations(documentId?: string) {
+  const q = documentId ? `?document_id=${encodeURIComponent(documentId)}` : ''
+  return fetchJsonOrThrow<{
+    available: boolean
+    message?: string | null
+    count?: number
+    items: Array<{
+      document_id: string
+      document_name?: string | null
+      latitude: number
+      longitude: number
+      location_source?: string
+      fact_id?: string | null
+      page?: number | null
+      evidence_text?: string | null
+      status?: string | null
+    }>
+    document?: Record<string, unknown>
+  }>(`/geology/locations${q}`)
 }
 
 export async function getGeologyAnalytics(params: Record<string, string | undefined> = {}) {

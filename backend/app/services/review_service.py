@@ -1,4 +1,4 @@
-"""Human review actions for Phase 3 extracted facts."""
+"""Human review actions for Phase 3 extracted facts + geological facts."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.geology.review import GeologicalReviewError, review_geological_fact
 from app.models import (
     ExtractedFact,
     FactCorrectionHistory,
@@ -45,10 +46,32 @@ def apply_review_action(db: Session, review_id: str, body: ReviewAction) -> Revi
         item.status = ReviewStatus.APPROVED.value
         if fact:
             fact.status = FactStatus.APPROVED.value
+        if item.geological_fact_id:
+            try:
+                review_geological_fact(
+                    db,
+                    item.geological_fact_id,
+                    action="approve",
+                    reviewer=body.reviewer,
+                    reason=body.review_notes,
+                )
+            except GeologicalReviewError as exc:
+                raise ReviewServiceError(str(exc)) from exc
     elif action == "reject":
         item.status = ReviewStatus.REJECTED.value
         if fact:
             fact.status = FactStatus.REJECTED.value
+        if item.geological_fact_id:
+            try:
+                review_geological_fact(
+                    db,
+                    item.geological_fact_id,
+                    action="reject",
+                    reviewer=body.reviewer,
+                    reason=body.review_notes,
+                )
+            except GeologicalReviewError as exc:
+                raise ReviewServiceError(str(exc)) from exc
     elif action == "correct":
         if body.corrected_value is None or str(body.corrected_value).strip() == "":
             raise ReviewServiceError("corrected_value is required for corrections.")
@@ -61,7 +84,20 @@ def apply_review_action(db: Session, review_id: str, body: ReviewAction) -> Revi
         if body.financial_year is not None:
             item.financial_year = body.financial_year
         item.status = ReviewStatus.CORRECTED.value
-        if fact:
+        if item.geological_fact_id:
+            try:
+                review_geological_fact(
+                    db,
+                    item.geological_fact_id,
+                    action="correct",
+                    corrected_value=item.corrected_value,
+                    corrected_unit=item.corrected_unit,
+                    reviewer=body.reviewer,
+                    reason=body.review_notes,
+                )
+            except GeologicalReviewError as exc:
+                raise ReviewServiceError(str(exc)) from exc
+        elif fact:
             original_value = fact.value
             original_unit = fact.unit
             # Keep original in meta history (never silently replace AI output only)
@@ -122,7 +158,8 @@ def apply_review_action(db: Session, review_id: str, body: ReviewAction) -> Revi
             "field": item.field_name,
             "original": item.extracted_value,
             "corrected": item.corrected_value,
-            "fact_id": item.extracted_fact_id,
+            "fact_id": item.extracted_fact_id or item.geological_fact_id,
+            "geological_fact_id": item.geological_fact_id,
         },
     )
     db.commit()

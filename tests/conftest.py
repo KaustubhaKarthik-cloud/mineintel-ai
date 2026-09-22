@@ -37,6 +37,11 @@ def db_session(tmp_path, monkeypatch):
 
     monkeypatch.setenv("USE_SQLITE", "true")
     monkeypatch.setenv("DEMO_MODE", "true")
+    # Tests use anonymous least-privilege USER (no review/validation). Production defaults AUTH_REQUIRED=true.
+    monkeypatch.setenv("AUTH_REQUIRED", "false")
+    # Keep unit tests on Tesseract so the suite does not load heavy Paddle models.
+    monkeypatch.setenv("OCR_ENGINE", "tesseract")
+    monkeypatch.setenv("OCR_FALLBACK", "tesseract")
 
     from app.utils import files as files_mod
     from app import config as config_mod
@@ -66,6 +71,58 @@ def db_session(tmp_path, monkeypatch):
 def client(db_session):
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture()
+def admin_user(db_session):
+    """Seed an ADMIN for tests that exercise review/validation/admin APIs."""
+    from app.auth.security import hash_password
+    from app.models import User, UserRole, UserStatus
+
+    existing = db_session.query(User).filter(User.username == "admin").first()
+    if existing:
+        existing.role = UserRole.ADMIN.value
+        existing.status = UserStatus.ACTIVE.value
+        db_session.commit()
+        return existing
+    user = User(
+        username="admin",
+        display_name="Test Admin",
+        password_hash=hash_password("admin123"),
+        role=UserRole.ADMIN.value,
+        status=UserStatus.ACTIVE.value,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
+def admin_headers(admin_user):
+    """Auth as ADMIN via X-Demo-User when AUTH_REQUIRED=false (anonymous is USER-only)."""
+    return {"X-Demo-User": admin_user.username}
+
+
+@pytest.fixture()
+def user_headers(db_session):
+    """Auth as least-privilege USER."""
+    from app.auth.security import hash_password
+    from app.models import User, UserRole, UserStatus
+
+    existing = db_session.query(User).filter(User.username == "user").first()
+    if not existing:
+        existing = User(
+            username="user",
+            display_name="Test User",
+            password_hash=hash_password("user123"),
+            role=UserRole.USER.value,
+            status=UserStatus.ACTIVE.value,
+        )
+        db_session.add(existing)
+        db_session.commit()
+        db_session.refresh(existing)
+    return {"X-Demo-User": existing.username}
 
 
 @pytest.fixture()

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth.deps import AuthUser, require_permission
+from app.auth.deps import AuthUser, normalize_role, require_permission
 from app.auth.security import hash_password
 from app.database import get_db
 from app.models import User, UserRole, UserStatus
@@ -21,7 +21,7 @@ class CreateUserRequest(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=6, max_length=128)
     display_name: Optional[str] = Field(default=None, max_length=128)
-    role: str = Field(default=UserRole.ANALYST.value)
+    role: str = Field(default=UserRole.USER.value)
 
 
 class UpdateUserRequest(BaseModel):
@@ -44,10 +44,14 @@ def _public(u: User) -> dict[str, Any]:
 
 
 def _validate_role(role: str) -> str:
-    allowed = {r.value for r in UserRole}
-    if role not in allowed:
-        raise HTTPException(status_code=400, detail=f"Invalid role. Allowed: {sorted(allowed)}")
-    return role
+    canon = normalize_role(role)
+    # Only accept canonical roles for new/updated accounts (no legacy create)
+    if canon not in {UserRole.ADMIN.value, UserRole.USER.value}:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid role. Allowed: admin, user",
+        )
+    return canon
 
 
 def _validate_status(st: str) -> str:

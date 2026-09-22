@@ -44,34 +44,59 @@ class StructuredFactHit:
     value_max: Optional[str] = None
     value_min_normalized: Optional[float] = None
     value_max_normalized: Optional[float] = None
+    measurement_type: Optional[str] = None
+
+
+# Controlled org aliases only — never character-substring (CIL ↛ NLCIL).
+_CONTROLLED_ENTITY_ALIASES: dict[str, frozenset[str]] = {
+    "nlcil": frozenset({"nlcil", "nlc india limited", "nlc india", "nlc"}),
+    "nlc india limited": frozenset({"nlcil", "nlc india limited", "nlc india", "nlc"}),
+    "nlc india": frozenset({"nlcil", "nlc india limited", "nlc india", "nlc"}),
+    "cil": frozenset({"cil", "coal india", "coal india limited", "coal india ltd"}),
+    "coal india limited": frozenset({"cil", "coal india", "coal india limited", "coal india ltd"}),
+    "coal india": frozenset({"cil", "coal india", "coal india limited", "coal india ltd"}),
+}
+
+
+def _entity_alias_set(normalized: str) -> frozenset[str]:
+    return _CONTROLLED_ENTITY_ALIASES.get(normalized, frozenset({normalized}))
 
 
 def _entity_soft_match(want: Optional[str], have: Optional[str]) -> bool:
-    """Token overlap match — works for unseen org names without a fixed map."""
+    """Controlled entity match — never broad substring (CIL must not match NLCIL)."""
     if not want:
         return True
     if not have:
         return False
     wn = normalize_entity(want) or ""
     hn = normalize_entity(have) or ""
+    if not wn or not hn:
+        return False
+    if wn == hn:
+        return True
+    # Controlled aliases (NLCIL ↔ NLC India Limited; CIL ↔ Coal India — disjoint)
+    if _entity_alias_set(wn) & _entity_alias_set(hn):
+        return True
     wa = set(wn.split())
-    ha = list(hn.split())
-    ha_set = set(ha)
+    ha_set = set(hn.split())
     if not wa or not ha_set:
         return False
-    if wa == ha_set or wa <= ha_set or ha_set <= wa:
+    if wa == ha_set:
+        return True
+    if wa <= ha_set or ha_set <= wa:
+        shorter, longer = (wa, ha_set) if len(wa) <= len(ha_set) else (ha_set, wa)
+        if len(shorter) == 1 and len(longer) == 1:
+            a, b = next(iter(shorter)), next(iter(longer))
+            if a != b and (a in b or b in a):
+                return False
         return True
     inter = wa & ha_set
     if len(inter) >= min(2, len(wa)) and (len(inter) / max(len(wa), 1)) >= 0.5:
         return True
-    # Acronym / stem: single token "nlcil" vs "nlc india limited"
+    # Single-token: exact token membership only (no "cil" inside "nlcil")
     if len(wa) == 1:
         token = next(iter(wa))
-        if ha and len(ha[0]) >= 3 and (token.startswith(ha[0]) or ha[0].startswith(token[:3])):
-            return True
-        compact = "".join(ha)
-        if len(token) >= 3 and (token in compact or compact.startswith(token[:3])):
-            return True
+        return token in ha_set
     return False
 
 
@@ -156,7 +181,8 @@ def conflicts_for_structured(
             continue
         if want_entity:
             ce = normalize_entity(c.entity_name) or ""
-            if ce != want_entity and want_entity not in ce:
+            # Exact normalized match only — never "cil" contained in "nlcil"
+            if ce != want_entity:
                 continue
         if want_periods:
             cp = normalize_period(c.period)

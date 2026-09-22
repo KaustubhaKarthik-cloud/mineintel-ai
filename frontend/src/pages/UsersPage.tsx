@@ -21,7 +21,7 @@ export function UsersPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [role, setRole] = useState('analyst')
+  const [role, setRole] = useState('user')
   const [busy, setBusy] = useState(false)
 
   async function reload() {
@@ -131,8 +131,7 @@ export function UsersPage() {
             onChange={(e) => setRole(e.target.value)}
           >
             <option value="admin">admin</option>
-            <option value="analyst">analyst</option>
-            <option value="reviewer">reviewer</option>
+            <option value="user">user</option>
           </select>
           <button
             type="submit"
@@ -168,12 +167,11 @@ export function UsersPage() {
                   <td className="px-4 py-3">
                     <select
                       className="rounded border border-ore-700 bg-ore-950 px-2 py-1 text-xs"
-                      value={u.role}
+                      value={u.role === 'analyst' ? 'user' : u.role === 'reviewer' ? 'admin' : u.role}
                       onChange={(e) => setRoleFor(u.id, e.target.value)}
                     >
                       <option value="admin">admin</option>
-                      <option value="analyst">analyst</option>
-                      <option value="reviewer">reviewer</option>
+                      <option value="user">user</option>
                     </select>
                   </td>
                   <td className="px-4 py-3">

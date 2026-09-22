@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.analytics.index_facts import index_fact_dimensions, list_analytics_documents, list_index_facts
+from app.auth.deps import AuthUser, require_permission
 from app.database import get_db
 from app.models import Document, DocumentChunk, ExtractedFact
 
@@ -15,7 +16,10 @@ router = APIRouter()
 
 
 @router.get("/dimensions")
-def explore_dimensions(db: Session = Depends(get_db)) -> dict[str, Any]:
+def explore_dimensions(
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("explore")),
+) -> dict[str, Any]:
     dims = index_fact_dimensions(db)
     docs = list_analytics_documents(db)
     # Also surface entities/metrics from AI-extracted facts
@@ -39,7 +43,10 @@ def explore_dimensions(db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @router.get("/documents")
-def explore_documents(db: Session = Depends(get_db)) -> dict[str, Any]:
+def explore_documents(
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("explore")),
+) -> dict[str, Any]:
     items = list_analytics_documents(db)
     # Enrich with upload metadata
     by_id = {d.id: d for d in db.query(Document).all()}
@@ -72,6 +79,7 @@ def explore_structured_facts(
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("explore")),
 ) -> dict[str, Any]:
     doc_ids = [document_id] if document_id else None
     facts = list_index_facts(
@@ -120,6 +128,7 @@ def explore_extracted_facts(
     limit: int = Query(200, ge=1, le=2000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("explore")),
 ) -> dict[str, Any]:
     q = db.query(ExtractedFact)
     if document_id:
@@ -170,6 +179,7 @@ def explore_chunks(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("explore")),
 ) -> dict[str, Any]:
     query = db.query(DocumentChunk).filter(DocumentChunk.is_active.is_(True))
     if document_id:

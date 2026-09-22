@@ -81,7 +81,9 @@ def system_status(
             "read_only": True,
         },
         "document_processing": {
-            "ocr_engine": "Tesseract",
+            "ocr_engine": settings.ocr_engine,
+            "ocr_fallback": settings.ocr_fallback,
+            "ocr_table_engine": settings.ocr_table_engine,
             "ocr_language": settings.ocr_language,
             "supported_types": ["pdf", "excel", "image"],
             "documents": doc_count,

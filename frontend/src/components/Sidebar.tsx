@@ -30,7 +30,7 @@ const nav: NavItem[] = [
   { to: '/documents', label: 'Documents', icon: FileText, permission: 'documents.read' },
   { to: '/upload', label: 'Upload', icon: Upload, permission: 'documents.upload' },
   { to: '/review', label: 'Review Queue', icon: ClipboardCheck, permission: 'review.act' },
-  { to: '/validation', label: 'Validation', icon: ShieldAlert, permission: 'documents.read' },
+  { to: '/validation', label: 'Validation', icon: ShieldAlert, permission: 'validation.act' },
   { to: '/search', label: 'Semantic Search', icon: Search, permission: 'search' },
   { to: '/explorer', label: 'Data Explorer', icon: Database, permission: 'explore' },
   { to: '/geology', label: 'Geological Explorer', icon: Mountain, permission: 'explore' },

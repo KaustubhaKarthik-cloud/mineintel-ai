@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.assistant.service import ask_assistant, build_chart_only
+from app.auth.deps import AuthUser, require_permission
 from app.database import get_db
 from app.schemas import (
     AssistantChartRequest,
@@ -50,7 +51,11 @@ def _to_chat_response(result: dict) -> ChatResponse:
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(body: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
+def chat(
+    body: ChatRequest,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("assistant")),
+) -> ChatResponse:
     """Evidence-grounded assistant (Phase 6). Falls back to demo only if service fails hard."""
     try:
         result = ask_assistant(
@@ -65,7 +70,11 @@ def chat(body: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
 
 
 @router.post("/query", response_model=ChatResponse)
-def query(body: AssistantQueryRequest, db: Session = Depends(get_db)) -> ChatResponse:
+def query(
+    body: AssistantQueryRequest,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("assistant")),
+) -> ChatResponse:
     try:
         result = ask_assistant(
             db,
@@ -80,7 +89,11 @@ def query(body: AssistantQueryRequest, db: Session = Depends(get_db)) -> ChatRes
 
 
 @router.post("/chart")
-def chart(body: AssistantChartRequest, db: Session = Depends(get_db)) -> dict:
+def chart(
+    body: AssistantChartRequest,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_permission("assistant")),
+) -> dict:
     try:
         return build_chart_only(
             db,

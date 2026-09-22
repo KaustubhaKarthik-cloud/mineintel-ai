@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
+import { RequirePermission } from './auth/RequirePermission'
 import { AppLayout } from './components/AppLayout'
 import { AnalyticsPage } from './pages/AnalyticsPage'
 import { AssistantPage } from './pages/AssistantPage'
@@ -31,8 +32,22 @@ export default function App() {
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="documents/:id" element={<DocumentDetailPage />} />
             <Route path="upload" element={<UploadPage />} />
-            <Route path="review" element={<ReviewPage />} />
-            <Route path="validation" element={<ValidationPage />} />
+            <Route
+              path="review"
+              element={
+                <RequirePermission permission="review.act">
+                  <ReviewPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="validation"
+              element={
+                <RequirePermission permission="validation.act">
+                  <ValidationPage />
+                </RequirePermission>
+              }
+            />
             <Route path="search" element={<SearchPage />} />
             <Route path="explorer" element={<ExplorerPage />} />
             <Route path="geology" element={<GeologicalExplorerPage />} />
@@ -41,8 +56,22 @@ export default function App() {
             <Route path="topics" element={<TopicsPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="reports/:id" element={<ReportDetailPage />} />
-            <Route path="audit" element={<AuditPage />} />
-            <Route path="users" element={<UsersPage />} />
+            <Route
+              path="audit"
+              element={
+                <RequirePermission permission="audit.read">
+                  <AuditPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="users"
+              element={
+                <RequirePermission permission="users.manage">
+                  <UsersPage />
+                </RequirePermission>
+              }
+            />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

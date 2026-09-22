@@ -26,7 +26,7 @@ Mining organizations work with large volumes of production reports, scanned PDFs
 MineIntel AI provides an end-to-end pipeline:
 
 * **Ingests** PDF / Excel / image documents with validation (type, size, magic bytes, safe filenames)
-* **Handles scanned and digital PDFs** (PyMuPDF text; low-density pages → Tesseract OCR)
+* **Handles scanned and digital PDFs** (PyMuPDF text; low-density pages → PaddleOCR primary with Tesseract fallback)
 * **Extracts structured mining facts** with confidence scores and page/table provenance
 * **Classifies & extracts geological facts** (formations, seams, boreholes, resources, thickness/depth) with metric-kind safety
 * **Routes low-confidence values** to a human review queue (approve / reject / correct)
@@ -52,7 +52,7 @@ FastAPI Backend
   ↓
 Document Ingestion
   ↓
-OCR / Document Parsing (Tesseract · PyMuPDF · pandas/openpyxl)
+OCR / Document Parsing (PaddleOCR · Tesseract · PyMuPDF · pandas/openpyxl)
   ↓
 AI Extraction + Geological Pipeline (G1–G3) + Human Review
   ↓
@@ -115,7 +115,7 @@ Local demo stack uses **SQLite + SQLAlchemy** for structured data and a local JS
 | Backend | Python 3.10–3.12 (3.11 recommended), FastAPI, SQLAlchemy, Pydantic |
 | Database (local demo) | SQLite |
 | Vector index (local) | Document chunks + JSON embeddings in SQLite |
-| OCR / PDF | Tesseract, PyMuPDF, Pillow |
+| OCR / PDF | PaddleOCR (optional primary), Tesseract (fallback), PyMuPDF, Pillow |
 | Excel | pandas, openpyxl |
 | Auth | JWT (PyJWT) + bcrypt |
 | Local AI | Ollama + Qwen (`qwen2.5:7b` @ `http://127.0.0.1:11434`) |
@@ -154,7 +154,8 @@ mineintel-ai/
   * Python **3.13** often works; **3.14+** is not yet supported by these pins
 * **Node.js** `^20.19` or `>=22.12` (Vite 8 requirement)
 * **npm** (ships with Node)
-* **Tesseract OCR** (for scanned PDFs/images)
+* **Tesseract OCR** (fallback for scanned PDFs/images)
+* **PaddleOCR + PaddlePaddle CPU** (optional primary OCR — see [docs/OCR_PADDLE.md](docs/OCR_PADDLE.md))
 
 **Optional**
 

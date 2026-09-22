@@ -227,6 +227,7 @@ class ReviewItemOut(BaseModel):
     document_id: str
     document_name: Optional[str] = None
     extracted_fact_id: Optional[str] = None
+    geological_fact_id: Optional[str] = None
     field_name: str
     extracted_value: Optional[str] = None
     corrected_value: Optional[str] = None

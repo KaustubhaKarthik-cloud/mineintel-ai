@@ -6,8 +6,7 @@ import {
   Loader2,
   Mountain,
   Shield,
-  ClipboardCheck,
-  BarChart3,
+  UserRound,
   ArrowRight,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
@@ -28,24 +27,16 @@ const DEMO_ROLES: DemoRole[] = [
     username: 'admin',
     password: 'admin123',
     label: 'Admin',
-    blurb: 'Users · audit · full control',
+    blurb: 'Review · validation · users · audit',
     icon: Shield,
   },
   {
-    id: 'analyst',
-    username: 'analyst',
-    password: 'analyst123',
-    label: 'Analyst',
-    blurb: 'Search · analytics · reports',
-    icon: BarChart3,
-  },
-  {
-    id: 'reviewer',
-    username: 'reviewer',
-    password: 'reviewer123',
-    label: 'Reviewer',
-    blurb: 'Review · validate · evidence',
-    icon: ClipboardCheck,
+    id: 'user',
+    username: 'user',
+    password: 'user123',
+    label: 'User',
+    blurb: 'Search · analytics · explorer · assistant',
+    icon: UserRound,
   },
 ]
 
@@ -152,7 +143,7 @@ export function LoginPage() {
           card to load them.
         </p>
 
-        <div className="mt-6 grid gap-2.5 sm:grid-cols-3">
+        <div className="mt-6 grid gap-2.5 sm:grid-cols-2">
           {DEMO_ROLES.map((role) => {
             const Icon = role.icon
             const active = selectedRole === role.id
@@ -275,7 +266,7 @@ export function LoginPage() {
           >
             Continue without signing in
             <span className="text-ore-600">·</span>
-            <span className="text-ore-500">demo analyst access</span>
+            <span className="text-ore-500">limited user access when auth is optional</span>
           </Link>
           <p className="text-[11px] text-ore-600">SIH26023 · local JWT auth · bcrypt passwords</p>
         </div>

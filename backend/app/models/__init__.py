@@ -282,6 +282,9 @@ class ReviewItem(Base):
     extracted_fact_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("extracted_facts.id"), nullable=True, index=True
     )
+    geological_fact_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("geological_facts.id"), nullable=True, index=True
+    )
     field_name: Mapped[str] = mapped_column(String(256), nullable=False)
     extracted_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     corrected_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -505,7 +508,11 @@ class ConflictEvidence(Base):
 
 
 class UserRole(str, Enum):
+    """Active roles: admin | user. Legacy analyst/reviewer normalized via auth.deps."""
+
     ADMIN = "admin"
+    USER = "user"
+    # Deprecated — kept for DB read compatibility until migrated
     ANALYST = "analyst"
     REVIEWER = "reviewer"
 
@@ -524,7 +531,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(32), default=UserRole.ANALYST.value, index=True)
+    role: Mapped[str] = mapped_column(String(32), default=UserRole.USER.value, index=True)
     status: Mapped[str] = mapped_column(String(32), default=UserStatus.ACTIVE.value, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

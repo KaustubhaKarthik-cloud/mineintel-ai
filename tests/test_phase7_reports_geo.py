@@ -353,14 +353,21 @@ def test_api_geological_pdf_excel(tmp_path, monkeypatch):
         assert xlsx.status_code == 200
         assert xlsx.content[:2] == b"PK"
 
-        denied = client.post(
-            "/api/reports/generate",
-            headers=_auth(reviewer_id, "reviewer"),
-            json={"domain": "geological"},
+        # USER (legacy analyst) cannot access admin-only validation
+        denied = client.get(
+            "/api/validation/conflicts",
+            headers=_auth(analyst_id, "analyst"),
         )
         assert denied.status_code == 403
         ok_read = client.get(f"/api/reports/{rid}/pdf", headers=_auth(reviewer_id, "reviewer"))
         assert ok_read.status_code == 200
+        # Reviewer (→ admin) can generate
+        ok_gen = client.post(
+            "/api/reports/generate",
+            headers=_auth(reviewer_id, "reviewer"),
+            json={"domain": "geological", "document_ids": [doc_id], "title": "Geo Admin"},
+        )
+        assert ok_gen.status_code == 200
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

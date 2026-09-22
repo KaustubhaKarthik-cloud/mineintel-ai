@@ -12,7 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { chatAssistant, documentFileUrl, getDocuments, getSystemStatus } from '../lib/api'
+import { ApiError, chatAssistant, documentFileUrl, getDocuments, getSystemStatus } from '../lib/api'
 import type { AssistantChart, ChatMessage, DocumentItem } from '../types'
 import { PageHeader } from '../components/ui'
 
@@ -111,7 +111,7 @@ export function AssistantPage() {
         if (ai.message) setAiBanner(String(ai.message))
         else if (ai.connection_health === 'unavailable') {
           setAiBanner(
-            'Local AI unavailable. Start Ollama and load the configured model to enable AI Assistant features.',
+            'AI Assistant is unavailable. Please ensure Ollama and qwen2.5:7b are running.',
           )
         }
       })
@@ -178,13 +178,21 @@ export function AssistantPage() {
           llm: res.llm ?? undefined,
         },
       ])
-    } catch {
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? err.message
+          : 'AI Assistant is unavailable. Please ensure Ollama and qwen2.5:7b are running.'
+      const unavailable =
+        /ollama|qwen|unavailable|timeout|connect|ECONNREFUSED|503|502/i.test(msg)
       setMessages((m) => [
         ...m,
         {
           id: `a-${Date.now()}`,
           role: 'assistant',
-          content: 'Assistant request failed. Check that the API is running.',
+          content: unavailable
+            ? 'AI Assistant is unavailable. Please ensure Ollama and qwen2.5:7b are running.'
+            : msg || 'Assistant request failed. Check that the API is running.',
           warnings: ['Request failed'],
         },
       ])
@@ -377,7 +385,7 @@ export function AssistantPage() {
             </div>
           ))}
           {loading ? (
-            <p className="text-sm text-ore-500 animate-pulse-soft">Retrieving evidence…</p>
+            <p className="text-sm text-ore-500 animate-pulse-soft">Loading… retrieving compatible evidence…</p>
           ) : null}
           <div ref={bottomRef} />
         </div>
