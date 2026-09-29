@@ -1,0 +1,7 @@
+# Optional PaddleOCR / PaddlePaddle (CPU) — install into the existing backend venv.
+# Core requirements.txt is unchanged; Tesseract (pytesseract) remains required.
+#
+#   .\backend\.venv\Scripts\python.exe -m pip install paddlepaddle==3.2.2 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
+#   .\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements-ocr-paddle.txt
+#
+paddleocr==3.7.0
